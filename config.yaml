@@ -1,0 +1,30 @@
+# 博主雷达 · 演示版配置(单一事实源)
+server:
+  host: 127.0.0.1
+  port: 18650          # 已核对不与本机现有服务冲突
+
+scan:
+  interval_seconds: 600    # 轮询间隔:演示 10 分钟一轮,礼貌采集
+  fetch_limit: 5           # 每博主每轮最多取几条
+  request_gap_seconds: 3   # 相邻请求间隔,防风控
+
+proxy:
+  http: http://127.0.0.1:7890   # 本机梯子(Clash);YouTube 通道走它,国内平台一律直连
+
+weibo:
+  cookie: ""   # 浏览器登录微博后复制整串 Cookie 粘这里 → 微博通道全自动(wu2198 同款);留空则微博标红提示
+
+classify:
+  mode: auto                     # auto=AI优先失败降规则 / ai / rules
+  base_url: https://open.bigmodel.cn/api/anthropic/v1/messages
+  model: GLM-5.2
+  key_env: ANTHROPIC_AUTH_TOKEN  # key 从环境变量读,不落盘
+  # tagset: [财经, 科技, AI, ...]  # 不填用默认 12 标签
+
+notify:
+  silent_hours: ["23:00", "07:00"]
+  channels:
+    inapp: {enabled: true}                 # 站内通知中心,永远开
+    macos: {enabled: false}                # 置 true 弹 macOS 系统通知
+    feishu_bot: {enabled: false, webhook: ""}   # 填自定义机器人 webhook 后置 true
+    feishu_app: {enabled: false, app_id: "", app_secret: "", open_id: ""}  # 自建应用通道(教学进阶)

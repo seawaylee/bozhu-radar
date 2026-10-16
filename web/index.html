@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>博主雷达 · 多平台主播监控</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+<style>
+/* 设计语言参照 ophub:浅色画布+白卡+金铜强调;内容流为主区(≈1fr/340px) */
+:root{
+  --bg:#f3f5f9; --panel:#ffffff; --panel2:#f1f3f8; --border:#e4e8f0; --border2:#d4dbe6;
+  --text:#1c2430; --muted:#5a6675; --dim:#8a94a3;
+  --red:#c93131; --red-bg:rgba(201,49,49,.09);
+  --green:#178a50; --green-bg:rgba(23,138,80,.10);
+  --gold:#a06e08; --gold-bg:rgba(160,110,8,.12);
+  --blue:#1a6ee0; --blue-bg:rgba(26,110,224,.10);
+  --teal:#0f766e; --teal-bg:rgba(15,118,110,.10); --purple:#7a3ecc;
+  --shadow-sm:0 1px 2px rgba(16,24,40,.05); --shadow-md:0 6px 24px rgba(16,24,40,.10);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding-bottom:60px;-webkit-font-smoothing:antialiased}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:1560px;margin:0 auto;padding:0 16px}
+/* 顶栏 */
+header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.90);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);margin-bottom:14px}
+.hbar{display:flex;align-items:center;gap:12px;padding:9px 0;flex-wrap:wrap}
+.logo{font-size:17px;font-weight:700;white-space:nowrap;letter-spacing:.3px}
+.logo em{font-style:normal;color:var(--red)}
+.logo span{color:var(--gold);font-weight:500;font-size:11px;margin-left:8px;padding:2px 9px;border-radius:999px;background:var(--gold-bg)}
+.sub{color:var(--dim);font-size:12px;width:100%;margin-top:-4px}
+.spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 12px;border-radius:999px;border:1px solid var(--border2);font-size:12px;color:var(--muted);background:#fff}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(23,138,80,.15)}
+.pill.scanning .dot{background:var(--gold);box-shadow:0 0 0 3px rgba(160,110,8,.18);animation:blink 1s infinite}
+.pill.live .dot{background:var(--teal);box-shadow:0 0 0 3px rgba(15,118,110,.15);animation:blink 2s infinite}
+.pill.reconnect .dot{background:var(--red);box-shadow:0 0 0 3px rgba(201,49,49,.15)}
+@keyframes blink{50%{opacity:.35}}
+.btn{background:#fff;border:1px solid var(--border2);color:var(--text);border-radius:9px;padding:5px 13px;font-size:13px;cursor:pointer;min-height:30px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;transition:all .15s;font-family:inherit}
+.btn:hover{border-color:rgba(26,110,224,.55);color:var(--blue)}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600}
+.btn.primary:hover{background:#0d655e;color:#fff}
+.btn.ghost{padding:2px 9px;min-height:24px;font-size:12px;border-radius:7px}
+.btn.danger:hover{border-color:rgba(201,49,49,.55);color:var(--red)}
+.btn.on{background:var(--teal-bg);border-color:var(--teal);color:var(--teal);font-weight:600}
+.btn:disabled{opacity:.5;cursor:wait}
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:13px;padding:12px 16px;box-shadow:var(--shadow-sm)}
+.kpi .n{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+.kpi .n small{font-size:12px;color:var(--dim);font-weight:500}
+.kpi .l{color:var(--muted);font-size:12px;margin-top:1px}
+.kpi.clickable{cursor:pointer;transition:all .15s}
+.kpi.clickable:hover{border-color:rgba(15,118,110,.5)}
+.kpi.active{background:var(--teal-bg);border-color:var(--teal)}
+/* 平台条 */
+.platforms{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
+.plat{position:relative;display:flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:7px 12px;font-size:12.5px;box-shadow:var(--shadow-sm);cursor:pointer;transition:all .15s}
+.plat:hover{border-color:rgba(15,118,110,.5)}
+.plat.active{background:var(--teal-bg);border-color:var(--teal)}
+.plat.off{opacity:.5;cursor:not-allowed}
+.plat.off:hover{border-color:var(--border)}
+.plat .dot{width:10px;height:10px;border-radius:3px;flex:none}
+.plat b{font-size:13px}
+.plat .mode{color:var(--dim);font-size:11px}
+.plat .cnt{color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
+.st{font-size:11px;padding:1px 9px;border-radius:7px;font-weight:500}
+.st.ok{background:var(--green-bg);color:var(--green)}
+.st.bad{background:var(--red-bg);color:var(--red)}
+.st.idle{background:rgba(90,102,117,.10);color:var(--muted)}
+.lastscan{display:none;position:absolute;margin-top:30px;background:#fff;border:1px solid var(--border2);border-radius:9px;padding:7px 11px;font-size:11px;color:var(--muted);z-index:9;max-width:400px;box-shadow:var(--shadow-md);white-space:normal;line-height:1.5}
+.plat:hover .lastscan{display:block}
+/* 布局:内容流主导 */
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px}
+@media(max-width:1080px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,1fr)}}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:13px;box-shadow:var(--shadow-sm)}
+.grid>.col-right .card{padding:13px 14px}
+.card h3{font-size:14px;margin-bottom:11px;display:flex;align-items:center;gap:8px;letter-spacing:.2px}
+.card h3::before{content:"";width:4px;height:14px;border-radius:2px;background:linear-gradient(180deg,#d4af5e,var(--gold));flex:0 0 auto}
+.card h3 .hint{color:var(--dim);font-size:11px;font-weight:400}
+.card h3 .ops{margin-left:auto;display:flex;gap:6px}
+/* 筛选 */
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+select,input[type=text]{background:#fff;border:1px solid var(--border2);color:var(--text);border-radius:9px;padding:6px 10px;font-size:13px;outline:none;font-family:inherit}
+select:focus,input:focus{border-color:rgba(26,110,224,.55)}
+.items-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--dim)}
+/* 内容卡(信息全量) */
+.item{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--dim);border-radius:12px;padding:12px 16px;margin-bottom:10px;box-shadow:var(--shadow-sm)}
+.item .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.ptag{font-size:11px;padding:1px 8px;border-radius:6px;color:#fff;font-weight:600}
+.tag{font-size:11px;padding:1px 9px;border-radius:7px;background:rgba(90,102,117,.10);color:var(--muted);font-weight:500}
+.badge{display:inline-block;padding:1px 8px;border-radius:7px;font-size:11px;line-height:17px;white-space:nowrap;font-weight:600}
+.badge.new{background:var(--red-bg);color:var(--red)}
+.badge.quiet{background:var(--blue-bg);color:var(--blue)}
+.item .title{font-size:15.5px;font-weight:700;margin:6px 0 2px;line-height:1.5}
+.item .summary{font-size:12.5px;color:var(--muted);margin:3px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.55}
+.item .meta{font-size:11.5px;color:var(--dim);margin-top:5px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.item .meta .pub{font-variant-numeric:tabular-nums}
+.item .meta a{font-size:11.5px}
+.empty{color:var(--dim);text-align:center;padding:34px 0;font-size:13px}
+.loadmore{display:block;margin:4px auto 2px}
+/* 身份与登录 */
+.idrow{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:13px}
+.idrow:last-child{border-bottom:none}
+.idrow .st-dot{width:9px;height:9px;border-radius:50%;flex:none;background:#c7cedb}
+.idrow .st-dot.ok{background:var(--teal);box-shadow:0 0 0 3px rgba(15,118,110,.12)}
+.idrow .st-dot.waiting{background:var(--gold);box-shadow:0 0 0 3px rgba(160,110,8,.15);animation:blink 1.2s infinite}
+.idrow .nm{font-weight:650;width:52px}
+.idrow .stat{color:var(--dim);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.idrow .ops{display:flex;gap:5px;flex:none}
+/* 向导 */
+.wiz-result{background:var(--panel2);border:1px dashed var(--border2);border-radius:10px;padding:12px;margin-top:10px;font-size:12.5px}
+.wiz-result .row{display:flex;gap:8px;align-items:center;margin:4px 0}
+.wiz-err{color:var(--red);font-size:12.5px;margin-top:8px}
+code{background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:0 6px;font-size:12px}
+/* 博主列表 */
+.grp-head{display:flex;align-items:center;gap:7px;padding:8px 2px 4px;font-size:12.5px;font-weight:700;border-bottom:2px solid var(--border)}
+.grp-head:first-child{padding-top:0}
+.grp-head .dot{width:9px;height:9px;border-radius:3px}
+.grp-head .cnt{color:var(--dim);font-weight:400;font-size:11.5px}
+.grp-head .mode{margin-left:auto;color:var(--dim);font-weight:400;font-size:11px}
+.creator{display:flex;align-items:center;gap:7px;padding:6px 2px;border-bottom:1px solid var(--border);font-size:12.5px;flex-wrap:wrap}
+.grp:last-child .creator:last-child{border-bottom:none}
+.creator .nm{font-weight:650;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.creator .cnt{color:var(--dim);font-size:11.5px;font-variant-numeric:tabular-nums;flex:none}
+.creator .upd{color:var(--dim);font-size:11px;flex:none}
+.creator .ops{margin-left:auto;display:flex;gap:5px;align-items:center}
+.creator.off{opacity:.5}
+.togglebtn{width:30px;height:17px;border-radius:999px;border:1px solid var(--border2);background:#e6eaf1;position:relative;cursor:pointer;transition:all .15s;flex:none}
+.togglebtn::after{content:"";position:absolute;top:1.5px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:all .15s}
+.togglebtn.on{background:var(--teal);border-color:var(--teal)}
+.togglebtn.on::after{left:14px}
+.manual-form{background:var(--panel2);border:1px solid var(--border2);border-radius:9px;padding:10px;margin:6px 0;display:flex;flex-direction:column;gap:7px;width:100%}
+.manual-form input{width:100%}
+/* 通知 */
+.noti{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:8px 11px;margin-bottom:7px;font-size:12px;color:var(--muted);white-space:pre-line}
+.noti b{color:var(--text)}
+.noti .foot{color:var(--dim);font-size:11px;margin-top:3px;display:flex;gap:8px;align-items:center}
+/* 分类分布 */
+.distrow{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12.5px;cursor:pointer;border-radius:6px;padding:1px 2px}
+.distrow:hover{background:var(--panel2)}
+.distrow.sel .nm{color:var(--teal);font-weight:700}
+.distrow .nm{width:50px;color:var(--text);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.distrow .bar{height:11px;border-radius:6px;background:linear-gradient(90deg,#d4af5e,var(--gold));min-width:3px}
+.distrow .cnt{color:var(--dim);font-size:11.5px;font-variant-numeric:tabular-nums;min-width:48px}
+/* 扫描动态 */
+.scanlog{display:flex;gap:7px;align-items:baseline;padding:5px 2px;border-bottom:1px dashed var(--border);font-size:11.5px}
+.scanlog:last-child{border-bottom:none}
+.scanlog .t{color:var(--dim);font-size:10.5px;flex:none;font-variant-numeric:tabular-nums}
+.scanlog .p{font-weight:650;flex:none}
+.scanlog .m{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.scanlog .ok{color:var(--green);flex:none} .scanlog .bad{color:var(--red);flex:none}
+
+/* ═══ ophub 式左侧导航(2026-10-16 站长:「抄 ophub 左边的导航栏,功能做进去」) ═══ */
+.rnav{position:fixed;left:0;top:0;bottom:0;width:186px;background:#fff;border-right:1px solid var(--border);z-index:60;display:flex;flex-direction:column;transition:width .18s;overflow:hidden}
+.rnav-head{display:flex;align-items:center;gap:8px;padding:13px 12px 11px;border-bottom:1px solid var(--border);white-space:nowrap}
+.rnav-head .nm{font-size:14.5px;font-weight:800;letter-spacing:.3px}
+.rnav-head .nm em{font-style:normal;color:var(--red)}
+.rnav-list{flex:1;padding:8px 7px;overflow-y:auto}
+.rnv{display:flex;align-items:center;gap:9px;width:100%;border:none;background:transparent;border-radius:9px;padding:8px 10px;font-size:13.5px;color:var(--muted);cursor:pointer;white-space:nowrap;font-family:inherit;transition:all .13s;margin-bottom:2px;text-align:left}
+.rnv:hover{background:var(--panel2);color:var(--text)}
+.rnv.on{background:var(--teal-bg);color:var(--teal);font-weight:700}
+.rnv .ico{flex:none;width:18px;text-align:center;font-size:14px}
+.rnv .bdg{margin-left:auto;background:var(--red);color:#fff;font-size:10px;border-radius:8px;padding:0 6px;min-width:16px;text-align:center;line-height:15px;display:none}
+.rnv .bdg.show{display:inline-block}
+.rnav-foot{padding:9px 12px;border-top:1px solid var(--border);font-size:10.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.rnav-collapsed .rnav{width:52px}
+body.rnav-collapsed .rnv span.txt,body.rnav-collapsed .rnav-head .nm,body.rnav-collapsed .rnav-foot{display:none}
+body.rnav-collapsed .rnv{justify-content:center;padding:9px 0}
+body.rnav-collapsed .rnv .bdg{position:absolute;transform:translate(12px,-9px);margin:0}
+.rnv{position:relative}
+.rmain{margin-left:186px;transition:margin-left .18s}
+body.rnav-collapsed .rmain{margin-left:52px}
+.rnav-backdrop{display:none;position:fixed;inset:0;background:rgba(16,24,40,.38);z-index:59}
+@media(max-width:900px){
+  .rnav{transform:translateX(-100%);transition:transform .18s;width:200px}
+  body.rnav-open .rnav{transform:none;box-shadow:var(--shadow-md)}
+  body.rnav-open .rnav-backdrop{display:block}
+  .rmain,body.rnav-collapsed .rmain{margin-left:0}
+  body.rnav-collapsed .rnv span.txt,body.rnav-collapsed .rnav-head .nm,body.rnav-collapsed .rnav-foot{display:inline}
+  body.rnav-collapsed .rnv{justify-content:flex-start;padding:8px 10px}
+}
+.view{display:none}.view.on{display:block}
+/* 内容流视图:主区全宽 + 窄侧栏(分类分布) */
+.sgrid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px}
+@media(max-width:1200px){.sgrid{grid-template-columns:1fr}}
+/* 通道实况表 */
+.chrow{display:flex;gap:9px;align-items:baseline;padding:6px 2px;border-bottom:1px dashed var(--border);font-size:12.5px}
+.chrow:last-child{border-bottom:none}
+.chrow b{width:56px;flex:none}
+.chrow .m{flex:none;font-size:11px;padding:0 7px;border-radius:6px;font-weight:600}
+.chrow .m.auto{background:var(--green-bg);color:var(--green)}
+.chrow .m.semi{background:rgba(90,102,117,.10);color:var(--muted)}
+.chrow .d{color:var(--muted);flex:1;line-height:1.55}
+/* 我的关注视图 */
+.fchips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+.frow2{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;margin-bottom:7px;font-size:13px;background:#fff}
+.frow2 input{width:16px;height:16px;flex:none}
+.frow2 .nm{font-weight:650;min-width:110px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow2 .extra{color:var(--dim);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow2 .watched{font-size:10.5px;color:var(--teal);background:var(--teal-bg);border-radius:6px;padding:0 6px;flex:none}
+
+/* 导入弹窗 */
+#modal{position:fixed;inset:0;background:rgba(28,36,48,.45);display:none;align-items:center;justify-content:center;z-index:100;padding:20px}
+#modal.show{display:flex}
+.mcard{background:#fff;border-radius:16px;box-shadow:var(--shadow-md);width:min(620px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
+.mhead{padding:14px 18px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.mhead b{font-size:15px}
+.mhead .hint{color:var(--dim);font-size:11.5px}
+.mhead .x{margin-left:auto}
+.msearch{padding:10px 18px 6px}
+.msearch input{width:100%}
+.mlist{overflow-y:auto;padding:4px 10px 10px;flex:1}
+.frow{display:flex;align-items:center;gap:10px;padding:7px 8px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;border-radius:8px}
+.frow:hover{background:var(--panel2)}
+.frow input{width:16px;height:16px;flex:none}
+.frow .nm{font-weight:650;flex:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .extra{color:var(--dim);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .watched{font-size:10.5px;color:var(--teal);background:var(--teal-bg);border-radius:6px;padding:0 6px;flex:none}
+.mfoot{padding:10px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.mfoot .sel{color:var(--muted);font-size:12.5px}
+footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:24px;line-height:1.9}
+#toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);background:#fff;border:1px solid var(--border2);border-radius:11px;padding:10px 18px;font-size:13px;box-shadow:var(--shadow-md);opacity:0;transition:.25s;z-index:110;pointer-events:none;max-width:80vw}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@keyframes slidein{from{opacity:0;transform:translateY(-10px) scale(.99)}to{opacity:1;transform:none}}
+.item.fresh{animation:slidein .5s ease}
+</style>
+</head>
+<body>
+<!-- ophub 式左侧导航(2026-10-16 站长:「抄 ophub 左边的导航栏,功能做进去」) -->
+<aside class="rnav" id="rnav">
+  <div class="rnav-head"><span class="nm">博主<em>雷达</em></span></div>
+  <nav class="rnav-list" id="navList"></nav>
+  <div class="rnav-foot">多平台主播监控</div>
+</aside>
+<div class="rnav-backdrop" id="navBackdrop" onclick="document.body.classList.remove('rnav-open')"></div>
+
+<div class="rmain">
+<header>
+  <div class="wrap">
+    <div class="hbar">
+      <button class="btn ghost" id="navBtn" onclick="toggleNav()" title="收起/展开导航">☰</button>
+      <div class="logo">博主<em>雷达</em><span>多平台主播监控</span></div>
+      <div class="spacer"></div>
+      <div class="pill" id="statusPill"><span class="dot"></span><span id="statusText">加载中…</span></div>
+      <div class="pill live" id="livePill" title="SSE 实时推送:新内容自动进页面,无需刷新"><span class="dot"></span>实时推送</div>
+      <button class="btn primary" onclick="scanNow()">⟳ 立即扫描</button>
+      <button class="btn" onclick="notifyTest()">测试通知</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ── 视图:内容流(默认,独占主区) ── -->
+  <section class="view on" id="view-stream">
+  <div class="sgrid">
+    <div>
+      <div class="card">
+        <h3>内容流 <span class="hint">新内容自动通知(带直达链接) · AI 自动分类 · 实时推送</span></h3>
+        <div class="filters">
+          <select id="fPlatform" onchange="setPlatform(this.value)"></select>
+          <select id="fCreator" onchange="setCreator(this.value)"></select>
+          <select id="fTag" onchange="setTag(this.value)"></select>
+          <button class="btn" id="btnNewOnly" onclick="toggleNewOnly()">⚡ 只看新内容</button>
+          <button class="btn ghost" id="btnClear" onclick="clearFilters()" style="display:none">✕ 清除筛选</button>
+        </div>
+        <div class="items-head"><span id="itemsCount"></span></div>
+        <div id="items"><div class="empty">加载中…</div></div>
+        <button class="btn loadmore" id="btnMore" style="display:none" onclick="loadItems(false)">加载更多 ↓</button>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h3>分类分布 <span class="hint">点击筛选</span></h3>
+        <div id="tagDist"></div>
+      </div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ── 视图:博主与监控 ── -->
+  <section class="view" id="view-creators">
+      <div class="card">
+        <h3>添加博主
+          <span class="ops"><button class="btn ghost" onclick="openImport()">⭐ 从我的关注导入</button></span>
+        </h3>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="wizInput" style="flex:1" placeholder="主页/分享链接、@handle,或「公众号:名字」" onkeydown="if(event.key==='Enter')wizParse()">
+          <button class="btn primary" onclick="wizParse()">识别</button>
+        </div>
+        <div id="wizOut"></div>
+      </div>
+      <div class="card">
+        <h3>监控列表 <span class="hint" id="creatorCount"></span></h3>
+        <div id="creators"></div>
+      </div>
+  </section>
+
+  <!-- ── 视图:身份与登录 ── -->
+  <section class="view" id="view-identity">
+      <div class="card">
+        <h3>身份与登录 <span class="hint">扫码=以你的身份抓,抓谁由监控列表定</span></h3>
+        <div id="identity"></div>
+      </div>
+      <div class="card">
+        <h3>平台通道实况 <span class="hint">为什么有的平台全自动、有的受限——如实说</span></h3>
+        <div class="chrow"><b>YouTube</b><span class="m auto">全自动</span><span class="d">yt-dlp 枚举频道(走代理);官方 RSS 端点本机 404 已弃用</span></div>
+        <div class="chrow"><b>B站</b><span class="m auto">全自动</span><span class="d">yt-dlp 枚举空间 + view 公开接口补标题/发布时间;高频访问偶发 412 会自愈</span></div>
+        <div class="chrow"><b>微博</b><span class="m auto">全自动</span><span class="d">桌面 ajax;需扫码登录或粘 cookie——健康条显示「受阻」就是这个原因,登录后即恢复</span></div>
+        <div class="chrow"><b>抖音</b><span class="m auto">全自动</span><span class="d">免登录:无头浏览器渲染分享页+拦截页内接口,每轮成功;扫码登录后还能拉关注列表批量添加</span></div>
+        <div class="chrow"><b>小红书</b><span class="m semi">受限</span><span class="d">web 接口带设备盾签名(x-s),免登录无公开出口;扫码登录已支持,关注列表接口属进阶内容</span></div>
+        <div class="chrow"><b>视频号</b><span class="m semi">半自动</span><span class="d">完全封闭在微信客户端内:无网页版、无公开接口、无扫码登录入口——手动登记是诚实天花板</span></div>
+        <div class="chrow"><b>公众号</b><span class="m semi">半自动</span><span class="d">无公开订阅接口,web 侧无稳定免登录出口——手动登记</span></div>
+      </div>
+  </section>
+
+  <!-- ── 视图:我的关注(扫码后拉取,搜索筛选批量加) ── -->
+  <section class="view" id="view-following">
+      <div class="card">
+        <h3>我的关注 <span class="hint">扫码登录后拉取你的关注列表 → 搜索筛选 → 勾选批量加入监控;关注几百个≠全部监控,挑着来</span>
+          <span class="ops"><button class="btn ghost" onclick="openImport()">⟳ 重新拉取</button></span></h3>
+        <div class="fchips" id="fPlat"></div>
+        <div class="filters"><input type="text" id="mSearch" style="flex:1" placeholder="输入名字筛选,如:财经 / 老纪 / 新闻…" oninput="renderImportList()"></div>
+        <div class="items-head"><span id="fCount"></span></div>
+        <div id="fList"></div>
+        <button class="btn primary loadmore" id="fAdd" onclick="submitImport()">加入监控并扫描</button>
+      </div>
+  </section>
+
+  <!-- ── 视图:通知中心 ── -->
+  <section class="view" id="view-notify">
+      <div class="card">
+        <h3>通知中心 <span class="hint">博主+平台+标题+分类+链接</span>
+          <span class="ops"><button class="btn ghost danger" onclick="clearNotis()">清空</button></span></h3>
+        <div id="notifications"></div>
+      </div>
+  </section>
+
+  <!-- ── 视图:扫描动态 ── -->
+  <section class="view" id="view-scan">
+      <div class="card">
+        <h3>扫描动态 <span class="hint">受阻自动重试,不拖垮其他平台</span></h3>
+        <div id="scanlogs"></div>
+      </div>
+  </section>
+
+  <!-- ── 视图:平台健康(KPI+七平台) ── -->
+  <section class="view" id="view-health">
+    <div class="kpis" id="kpis"></div>
+    <div class="platforms" id="platforms"></div>
+  </section>
+
+  <footer>
+    全自动=YouTube/B站/微博(扫码登录或 cookie)/抖音 · 小红书需登录且接口带设备盾(进阶) · 视频号无网页版(跨平台同名覆盖) · 公众号无公开订阅接口<br>
+    外部通知通道(macOS/飞书)在 config.yaml 开启 · 数据存于 demo/data/(SQLite)
+  </footer>
+</div>
+</div><!-- /rmain -->
+<div id="toast"></div>
+
+<script>
+const PAGE_SIZE=60;
+const state={platform:'',creator_id:'',tag:'',new_only:false,offset:0,total:0,loaded:0};
+let creatorsCache=[],statusCache=null,manualOpenId=null;
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+/* ---------- ophub 式左侧导航 ---------- */
+const VIEWS=[
+  {k:'stream',ico:'📥',txt:'内容流'},
+  {k:'creators',ico:'👥',txt:'博主与监控'},
+  {k:'identity',ico:'🔑',txt:'身份与登录'},
+  {k:'following',ico:'⭐',txt:'我的关注'},
+  {k:'notify',ico:'🔔',txt:'通知中心',bdg:'notiBdg'},
+  {k:'scan',ico:'📡',txt:'扫描动态'},
+  {k:'health',ico:'📊',txt:'平台健康'},
+];
+let curView='stream';
+function buildNav(){document.getElementById('navList').innerHTML=VIEWS.map(v=>
+  `<button class="rnv" data-v="${v.k}" onclick="switchView('${v.k}')"><span class="ico">${v.ico}</span><span class="txt">${v.txt}</span>${v.bdg?`<span class="bdg" id="${v.bdg}"></span>`:''}</button>`).join('')}
+function switchView(k){
+  if(!VIEWS.some(v=>v.k===k))k='stream';
+  curView=k;
+  document.querySelectorAll('.view').forEach(el=>el.classList.toggle('on',el.id==='view-'+k));
+  document.querySelectorAll('.rnv').forEach(b=>b.classList.toggle('on',b.dataset.v===k));
+  try{localStorage.setItem('radar_view',k)}catch(e){}
+  document.body.classList.remove('rnav-open');
+  if(k==='notify'){const b=document.getElementById('notiBdg');if(b)b.classList.remove('show')}
+  if(k==='following'&&!importData.list.length)openImport();
+  window.scrollTo(0,0);
+}
+function toggleNav(){
+  if((window.innerWidth||1200)<=900){document.body.classList.toggle('rnav-open');return}
+  document.body.classList.toggle('rnav-collapsed');
+  try{localStorage.setItem('radar_nav_collapsed',document.body.classList.contains('rnav-collapsed')?'1':'0')}catch(e){}
+}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3000)}
+async function api(path,opts){const r=await fetch(path,Object.assign({headers:{'Content-Type':'application/json'}},opts||{}));return r.json()}
+const MODE_LABEL={auto:'全自动',semi:'半自动'};
+const ID_LABEL={douyin:'抖音',weibo:'微博',xhs:'小红书',youtube:'YouTube'};
+
+function fmtTime(iso){
+  if(!iso)return'';
+  const d=new Date(iso);if(isNaN(d))return iso;
+  const now=new Date(),hh=String(d.getHours()).padStart(2,'0'),mm=String(d.getMinutes()).padStart(2,'0');
+  const sameDay=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+  const yest=new Date(now);yest.setDate(now.getDate()-1);
+  if(sameDay(d,now))return`今天 ${hh}:${mm}`;
+  if(sameDay(d,yest))return`昨天 ${hh}:${mm}`;
+  const md=`${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return d.getFullYear()===now.getFullYear()?`${md} ${hh}:${mm}`:`${d.getFullYear()}-${md}`;
+}
+function absTime(iso){if(!iso)return'';const d=new Date(iso);if(isNaN(d))return iso;
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`}
+
+/* ---------- 状态/KPI/平台条 ---------- */
+async function loadStatus(){
+  try{const d=await api('/api/status');statusCache=d;renderStatus(d);syncFilterUI()}catch(e){console.error(e)}
+}
+function renderStatus(d){
+  const s=d.server,st=d.stats;
+  const pill=document.getElementById('statusPill'),txt=document.getElementById('statusText');
+  pill.classList.toggle('scanning',s.scanning);
+  txt.textContent=s.scanning?'扫描中…':`运行中 · 下轮约 ${Math.ceil(s.next_scan_in/60)} 分钟后`;
+  const aiPct=st.items?Math.round(st.ai_classified/st.items*100):0;
+  const disabled=creatorsCache.filter(c=>!c.enabled).length;
+  document.getElementById('kpis').innerHTML=`
+    <div class="kpi"><div class="n">${st.creators}${disabled?`<small> ·${disabled}停用</small>`:''}</div><div class="l">监控博主</div></div>
+    <div class="kpi"><div class="n">${st.items}</div><div class="l">内容总数</div></div>
+    <div class="kpi clickable ${state.new_only?'active':''}" onclick="toggleNewOnly()" title="点击筛选:只看触发过通知的增量内容">
+      <div class="n" style="color:var(--red)">${st.items_today}</div><div class="l">今日新入库 ${state.new_only?'· 筛选中':''}</div></div>
+    <div class="kpi"><div class="n">${st.ai_classified}<small> ${aiPct}%</small></div><div class="l">AI 分类条数</div></div>`;
+  document.getElementById('platforms').innerHTML=d.adapters.map(a=>{
+    if(a.disabled){
+      return `<div class="plat off" title="${esc(a.note||'暂不可用')}">
+        <span class="dot" style="background:#c7cedb"></span><b>${esc(a.label)}</b>
+        <span class="mode">${esc((a.note||'').slice(0,16))}…</span>
+        <span class="st idle">置灰·不可用</span><div class="lastscan">${esc(a.note||'')}</div></div>`;
+    }
+    let cls='idle',label=a.mode==='semi'?'半自动':'待扫描';
+    const ls=a.last_scan;
+    if(a.mode==='auto'&&ls){label=ls.ok?'正常':'受阻';cls=ls.ok?'ok':'bad'}
+    const tip=a.mode!=='auto'
+      ? esc(a.label+' · '+label+(a.note?(' — '+a.note):''))
+      : (ls?esc((ls.ok?'✓ ':'✗ ')+ls.ts+' · '+ls.message):'尚无扫描记录');
+    return `<div class="plat ${state.platform===a.platform?'active':''}" onclick="setPlatform('${a.platform}')" title="${a.mode!=='auto'?(esc(a.note||'')):''}">
+      <span class="dot" style="background:${a.color}"></span><b>${esc(a.label)}</b>
+      <span class="mode">${a.mode_label}</span><span class="cnt">${a.creators}主/${a.items}条</span>
+      <span class="st ${cls}">${label}</span><div class="lastscan">${tip}</div></div>`;
+  }).join('');
+  renderTagDist(d.tag_dist);
+}
+
+/* ---------- 身份与登录 ---------- */
+let identityCache=[],identityPoll=null;
+async function loadIdentity(){
+  try{
+    const d=await api('/api/identity/status');identityCache=d.identities||[];
+    document.getElementById('identity').innerHTML=identityCache.map(it=>{
+      const waiting=it.login_state==='waiting';
+      const cls=it.logged_in?'ok':(waiting?'waiting':'');
+      const stat=it.logged_in?`已登录 · ${esc(it.saved_at||'')}`:(waiting?'等待扫码…':'未登录');
+      const ops=[];
+      if(!it.logged_in)ops.push(`<button class="btn ghost" onclick="qrLogin('${it.platform}')">扫码登录</button>`);
+      if(it.logged_in&&it.platform!=='xhs')ops.push(`<button class="btn ghost" onclick="refreshFollowing('${it.platform}')">拉取我的关注</button>`);
+      return `<div class="idrow"><span class="st-dot ${cls}"></span><span class="nm">${ID_LABEL[it.platform]||it.platform}</span>
+        <span class="stat">${stat}${waiting?'(浏览器窗口已开,在里面点登录扫码)':''}</span>
+        <span class="ops">${ops.join('')}</span></div>`;
+    }).join('');
+    const anyWaiting=identityCache.some(it=>it.login_state==='waiting');
+    if(anyWaiting&&!identityPoll){identityPoll=setInterval(loadIdentity,3000)}
+    if(!anyWaiting&&identityPoll){clearInterval(identityPoll);identityPoll=null}
+    renderFPlat();
+  }catch(e){console.error(e)}
+}
+async function qrLogin(platform){
+  const d=await api('/api/identity/login',{method:'POST',body:JSON.stringify({platform})});
+  toast(d.ok?d.tip:`失败:${d.error}`);
+  setTimeout(loadIdentity,1500);loadIdentity();
+}
+async function refreshFollowing(platform){
+  toast(`正在拉取你在${ID_LABEL[platform]}的关注列表…(几十个关注约几秒)`);
+  const d=await api('/api/following/refresh',{method:'POST',body:JSON.stringify({platform})});
+  if(!d.ok){toast(`拉取失败:${d.error}`);return}
+  toast(`已拉取 ${d.count} 位关注,勾选后加入监控`);
+  await openImport(platform);switchView('following');
+}
+
+/* ---------- 我的关注(视图):拉取→搜索→勾选→批量加入 ---------- */
+let importData={platform:'douyin',list:[],selected:new Set()};
+function renderFPlat(){
+  const chips=(identityCache||[]).filter(it=>it.platform!=='xhs').map(it=>{
+    const on=importData.platform===it.platform;
+    return `<button class="btn ${on?'on':''}" onclick="openImport('${it.platform}')">${ID_LABEL[it.platform]||it.platform}
+      ${it.logged_in?(it.following_count?` · ${it.following_count}`:''):' · 未登录'}</button>`;
+  }).join('');
+  document.getElementById('fPlat').innerHTML=chips||'<span class="hint">先到「身份与登录」扫码,再回来拉取关注</span>';
+}
+async function openImport(platform){
+    if(platform==='xhs')platform='';
+  importData.platform=platform||((identityCache.find(i=>i.logged_in&&i.platform!=='xhs')||{}).platform)||'douyin';
+  const si=document.getElementById('mSearch');if(si)si.value='';
+  const d=await api(`/api/following?platform=${importData.platform}`).catch(()=>({items:[],total:0}));
+  importData.list=d.items||[];importData.selected=new Set();
+  renderFPlat();renderImportList();
+}
+function renderImportList(){
+  const q=(document.getElementById('mSearch')||{}).value||'';
+  const rows=importData.list.filter(f=>!q||f.nickname.includes(q));
+  document.getElementById('fList').innerHTML=rows.length?rows.map(f=>`
+    <label class="frow2">
+      <input type="checkbox" ${importData.selected.has(f.platform_uid)?'checked':''} ${f.monitored?'disabled':''} onchange="toggleSel('${esc(f.platform_uid)}',this.checked)">
+      <span class="nm">${esc(f.nickname)}</span>
+      <span class="extra">${esc(f.extra||'')}</span>
+      ${f.monitored?'<span class="watched">已监控</span>':''}
+    </label>`).join(''):`<div class="empty" style="padding:20px 0">${q?'没有匹配的关注':'暂无关注数据——先在「身份与登录」扫码,然后点右上「重新拉取」'}</div>`;
+  document.getElementById('fCount').textContent=importData.list.length?`共 ${importData.list.length} 位关注 · 已选 ${importData.selected.size}`:'';
+}
+function toggleSel(uid,on){on?importData.selected.add(uid):importData.selected.delete(uid);
+  document.getElementById('fCount').textContent=`共 ${importData.list.length} 位关注 · 已选 ${importData.selected.size}`}
+async function submitImport(){
+  if(!importData.selected.size){toast('先勾选要监控的博主');return}
+  const creators=importData.list.filter(f=>importData.selected.has(f.platform_uid))
+    .map(f=>({platform_uid:f.platform_uid,name:f.nickname}));
+  const d=await api('/api/creators/bulk',{method:'POST',body:JSON.stringify({platform:importData.platform,creators})});
+  toast(d.ok?`已加入 ${d.added} 位(跳过 ${d.skipped} 位重复),已自动触发扫描`:`失败:${d.error}`);
+  openImport(importData.platform);loadAll();switchView('creators');
+}
+
+/* ---------- 筛选(三联动) ---------- */
+function syncFilterUI(){
+  const ads=(statusCache?.adapters||[]).filter(a=>!a.disabled);
+  document.getElementById('fPlatform').innerHTML='<option value="">全部平台</option>'+ads.map(a=>`<option value="${a.platform}" ${state.platform===a.platform?'selected':''}>${esc(a.label)}</option>`).join('');
+  const pool=state.platform?creatorsCache.filter(c=>c.platform===state.platform):creatorsCache;
+  document.getElementById('fCreator').innerHTML='<option value="">全部博主</option>'+pool.map(c=>`<option value="${c.id}" ${String(state.creator_id)===String(c.id)?'selected':''}>${esc(c.name)}(${c.item_count})</option>`).join('');
+  const tags=(statusCache?.tag_dist||[]);
+  document.getElementById('fTag').innerHTML='<option value="">全部分类</option>'+tags.map(t=>`<option value="${esc(t.tag)}" ${state.tag===t.tag?'selected':''}>${esc(t.tag)} (${t.n})</option>`).join('');
+  document.getElementById('btnNewOnly').classList.toggle('on',state.new_only);
+  document.getElementById('btnClear').style.display=(state.platform||state.creator_id||state.tag||state.new_only)?'':'none';
+  document.querySelectorAll('.distrow').forEach(el=>el.classList.toggle('sel',el.dataset.tag===state.tag));
+}
+function setPlatform(p){state.platform=p;
+  if(state.creator_id){const c=creatorsCache.find(x=>String(x.id)===String(state.creator_id));if(c&&c.platform!==p)state.creator_id=''}
+  loadItems(true);syncFilterUI();refreshChipsActive()}
+function setCreator(id){state.creator_id=id;
+  if(id){const c=creatorsCache.find(x=>String(x.id)===String(id));if(c&&c.platform!==state.platform)state.platform=c.platform}
+  loadItems(true);syncFilterUI();refreshChipsActive()}
+function setTag(t){state.tag=(state.tag===t?'':t);loadItems(true);syncFilterUI()}
+function toggleNewOnly(){state.new_only=!state.new_only;loadItems(true);syncFilterUI();if(statusCache)renderStatus(statusCache)}
+function clearFilters(){state.platform='';state.creator_id='';state.tag='';state.new_only=false;loadItems(true);syncFilterUI();refreshChipsActive()}
+function refreshChipsActive(){
+  document.querySelectorAll('.plat').forEach(el=>el.classList.remove('active'));
+  if(state.platform){const el=document.querySelector(`.plat[onclick="setPlatform('${state.platform}')"]`);if(el)el.classList.add('active')}
+}
+
+/* ---------- 内容流 ---------- */
+function buildQuery(reset){
+  const q=new URLSearchParams();
+  if(state.platform)q.set('platform',state.platform);
+  if(state.creator_id)q.set('creator_id',state.creator_id);
+  if(state.tag)q.set('tag',state.tag);
+  if(state.new_only)q.set('new_only','1');
+  q.set('limit',PAGE_SIZE);q.set('offset',reset?0:state.offset);
+  return q.toString();
+}
+async function loadItems(reset=true){
+  if(reset)state.offset=0;
+  try{
+    const d=await api('/api/items?'+buildQuery(reset));
+    state.total=d.total;
+    if(reset){renderItems(d.items,false);state.loaded=d.items.length}
+    else{renderItems(d.items,true);state.loaded+=d.items.length;state.offset+=d.items.length}
+    document.getElementById('itemsCount').textContent=`共 ${d.total} 条${hasFilter()?'(筛选中)':''} · 显示 ${state.loaded}`;
+    document.getElementById('btnMore').style.display=state.loaded<d.total?'':'none';
+  }catch(e){console.error(e)}
+}
+function hasFilter(){return !!(state.platform||state.creator_id||state.tag||state.new_only)}
+function itemCardHtml(it,fresh){
+  const colors={},labels={};(statusCache?.adapters||[]).forEach(a=>{colors[a.platform]=a.color;labels[a.platform]=a.label});
+  const title=it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>`:esc(it.title);
+  const clsSrc=it.classifier==='ai'?'AI 分类':it.classifier==='rules'?'规则分类':'';
+  // 诚实口径:有真实发布时间才标「发布」;拿不到的平台明确标「入库」,不冒充
+  const timeChip=it.published_at?`<span style="margin-left:auto" title="发布时间">${esc(fmtTime(it.published_at))}</span>`:'';
+  const timeMeta=it.published_at
+    ?`<span class="pub" title="平台提供的发布时间">发布 ${esc(absTime(it.published_at))}</span>`
+    :(it.first_seen_at?`<span class="pub" title="该平台不提供发布时间,此为我们首次看到的时间">入库 ${esc(absTime(it.first_seen_at))}</span>`:'');
+  return `<div class="item${fresh?' fresh':''}" style="border-left-color:${colors[it.platform]||'#8a94a3'}">
+    <div class="top"><span class="ptag" style="background:${colors[it.platform]||'#555'}">${esc(labels[it.platform]||it.platform)}</span>
+    <span>${esc(it.creator_name||'')}</span>${it.is_baseline?'':'<span class="badge new">NEW</span>'}<span class="tag">${esc(it.tag||'未分类')}</span>
+    ${timeChip}</div>
+    <div class="title">${title}</div>
+    ${it.summary?`<div class="summary">${esc(it.summary)}</div>`:''}
+    <div class="meta">${timeMeta}${clsSrc?`<span>${clsSrc}</span>`:''}${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener">直达链接 ↗</a>`:''}</div></div>`;
+}
+function renderItems(items,append){
+  const box=document.getElementById('items');
+  const html=items.map(it=>itemCardHtml(it,false)).join('');
+  if(append){box.insertAdjacentHTML('beforeend',html)}
+  else{box.innerHTML=html||'<div class="empty">没有匹配的内容——试试清除筛选,或添加博主/扫码登录后导入关注</div>'}
+}
+function itemMatchesFilters(it){
+  if(state.platform&&it.platform!==state.platform)return false;
+  if(state.tag&&it.tag!==state.tag)return false;
+  if(state.new_only&&it.is_baseline)return false;
+  if(state.creator_id){
+    const c=creatorsCache.find(x=>String(x.id)===String(state.creator_id));
+    if(c&&(it.platform!==c.platform||it.platform_uid!==c.platform_uid))return false;
+  }
+  return true;
+}
+
+/* ---------- 博主列表 ---------- */
+async function loadCreators(){
+  try{
+    const d=await api('/api/creators');creatorsCache=d.creators;
+    const labels={},colors={},modes={};(statusCache?.adapters||[]).forEach(a=>{labels[a.platform]=a.label;colors[a.platform]=a.color;modes[a.platform]=a.mode});
+    document.getElementById('creatorCount').textContent=`共 ${creatorsCache.length} 位`;
+    const order=['youtube','bilibili','weibo','douyin','gzh','xhs','sph'];
+    const groups=order.map(p=>({p,list:creatorsCache.filter(c=>c.platform===p)})).filter(g=>g.list.length);
+    document.getElementById('creators').innerHTML=groups.map(g=>`
+      <div class="grp">
+        <div class="grp-head"><span class="dot" style="background:${colors[g.p]||'#8a94a3'}"></span>
+          ${esc(labels[g.p]||g.p)}<span class="cnt">${g.list.length} 位</span>
+          <span class="mode">${esc(MODE_LABEL[modes[g.p]]||'')}</span></div>
+        ${g.list.map(c=>{
+          const mode=modes[c.platform]||c.mode;
+          const ops=[];
+          if(mode!=='auto')ops.push(`<button class="btn ghost" onclick="toggleManual(${c.id})">＋登记</button>`);
+          ops.push(`<button class="btn ghost danger" title="移除" onclick="delCreator(${c.id})">✕</button>`);
+          const form=manualOpenId===c.id?`<div class="manual-form">
+            <input type="text" id="mTitle-${c.id}" placeholder="内容标题(必填)">
+            <input type="text" id="mUrl-${c.id}" placeholder="直达链接(可选)">
+            <div style="display:flex;gap:6px;justify-content:flex-end">
+              <button class="btn ghost" onclick="toggleManual(null)">取消</button>
+              <button class="btn primary ghost" onclick="submitManual(${c.id})">登记并通知</button>
+            </div></div>`:'';
+          return `<div class="creator ${c.enabled?'':'off'}">
+            <div class="togglebtn ${c.enabled?'on':''}" title="${c.enabled?'点击停用(扫描跳过)':'点击启用'}" onclick="toggleCreator(${c.id},${c.enabled})"></div>
+            <span class="nm" title="${esc(c.name)}">${esc(c.name)}</span>
+            <span class="cnt">${c.item_count}条</span>
+            <span class="upd">${c.last_item_at?('更新 '+fmtTime(c.last_item_at)):'暂无内容'}</span>
+            <span class="ops">${ops.join('')}</span>${form}</div>`;
+        }).join('')}
+      </div>`).join('')||'<div class="empty">还没有博主——扫码登录后从关注导入,或用下面的向导添加</div>';
+    syncFilterUI();
+  }catch(e){console.error(e)}
+}
+
+/* ---------- 通知 ---------- */
+async function loadNotifications(){
+  try{
+    const d=await api('/api/notifications');
+    document.getElementById('notifications').innerHTML=d.notifications.length?d.notifications.map(n=>{
+      const lines=esc(n.content).split('\n');
+      return `<div class="noti"><b>${lines[0]}</b>\n${lines.slice(1).join('\n')}
+        <div class="foot"><span>${esc(fmtTime(n.created_at))}</span><span>通道:${esc(n.channels)}</span>${n.deferred?'<span class="badge quiet">静默期暂缓外发</span>':''}</div></div>`;
+    }).join(''):'<div class="empty">暂无通知——有新内容时自动出现</div>';
+    const bdg=document.getElementById('notiBdg');
+    if(bdg){const n=d.notifications.filter(n=>!n.read).length||d.notifications.length;
+      if(n&&curView!=='notify'){bdg.textContent=n>99?'99+':n;bdg.classList.add('show')}else bdg.classList.remove('show')}
+  }catch(e){console.error(e)}
+}
+async function clearNotis(){
+  if(!confirm('清空通知中心的历史记录?'))return;
+  await api('/api/notifications',{method:'DELETE'});toast('已清空');loadNotifications();
+}
+
+/* ---------- 分类分布/扫描动态 ---------- */
+function renderTagDist(dist){
+  const total=dist.reduce((s,t)=>s+t.n,0)||1;
+  document.getElementById('tagDist').innerHTML=dist.length?dist.map(t=>{
+    const w=Math.max(4,Math.round(t.n/dist[0].n*190));
+    return `<div class="distrow ${state.tag===t.tag?'sel':''}" data-tag="${esc(t.tag)}" onclick="setTag('${esc(t.tag)}')">
+      <span class="nm">${esc(t.tag)}</span><span class="bar" style="width:${w}px"></span>
+      <span class="cnt">${t.n} · ${Math.round(t.n/total*100)}%</span></div>`;
+  }).join(''):'<div class="empty">暂无</div>';
+}
+async function loadScanlogs(){
+  try{
+    const d=await api('/api/scanlogs');
+    const labels={};(statusCache?.adapters||[]).forEach(a=>{labels[a.platform]=a.label});
+    document.getElementById('scanlogs').innerHTML=d.logs.length?d.logs.map(l=>`<div class="scanlog" title="${esc(l.message||'')}">
+      <span class="t">${esc((l.ts||'').slice(11,19))}</span>
+      <span class="p">${esc(labels[l.platform]||l.platform)}</span>
+      <span class="${l.ok?'ok':'bad'}">${l.ok?'✓':'✗'}</span>
+      <span class="m">${l.ok?('+'+(l.new_items||0)+'条 '):''}${esc(l.message||'')}</span>
+    </div>`).join(''):'<div class="empty">暂无扫描记录</div>';
+  }catch(e){console.error(e)}
+}
+
+function loadAll(){loadStatus().then(()=>{loadItems(true);loadCreators();loadScanlogs()});loadNotifications();loadIdentity()}
+
+/* ---------- SSE ---------- */
+let sseLive=false,refreshTimer=null;
+function setLivePill(on){sseLive=on;const p=document.getElementById('livePill');p.classList.toggle('live',on);p.classList.toggle('reconnect',!on)}
+function debouncedRefresh(){clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>{loadStatus().then(()=>{loadCreators();loadScanlogs()});loadNotifications()},600)}
+function connectSSE(){
+  const es=new EventSource('/api/stream');
+  es.onopen=()=>setLivePill(true);
+  es.onerror=()=>setLivePill(false);
+  es.onmessage=(msg)=>{
+    let ev;try{ev=JSON.parse(msg.data)}catch(e){return}
+    if(ev.type==='hello'){setLivePill(true);return}
+    if(ev.type==='new_items'){
+      const box=document.getElementById('items');
+      const toPrepend=(ev.items||[]).filter(itemMatchesFilters);
+      if(toPrepend.length){
+        if(box.querySelector('.empty'))box.innerHTML='';
+        box.insertAdjacentHTML('afterbegin',toPrepend.map(it=>itemCardHtml(it,true)).join(''));
+        state.total+=toPrepend.length;state.loaded+=toPrepend.length;
+        document.getElementById('itemsCount').textContent=`共 ${state.total} 条${hasFilter()?'(筛选中)':''} · 显示 ${state.loaded}`;
+      }
+      const hot=(ev.items||[]).filter(it=>it.notified);
+      if(hot.length){const it=hot[0];toast(`🆕 新内容:${it.creator_name} · ${(it.title||'').slice(0,30)}…`)}
+      debouncedRefresh();
+    }else if(ev.type==='adapter_done'||ev.type==='scan_started'||ev.type==='scan_round_done'){
+      debouncedRefresh();
+    }
+  };
+}
+
+/* ---------- actions ---------- */
+async function scanNow(){
+  const d=await api('/api/scan',{method:'POST'});
+  toast(d.started?'已触发一轮手动扫描,动态见右栏':'正在扫描中,稍候');
+  setTimeout(loadScanlogs,4000);setTimeout(loadScanlogs,15000);
+}
+async function notifyTest(){
+  const d=await api('/api/notify/test',{method:'POST'});
+  toast(d.deferred?'测试通知已入中心(当前为静默时段,不外发)':'测试通知已入中心'+(d.macos_error?`·macOS通道异常:${d.macos_error}`:''));loadNotifications();
+}
+let wizSuggestion=null;
+async function wizParse(){
+  const input=document.getElementById('wizInput').value.trim();
+  if(!input)return;
+  wizSuggestion=null;
+  document.getElementById('wizOut').innerHTML='<div class="wiz-err" style="color:var(--muted)">识别中…(需要访问平台,约几秒;分享短链会先解析跳转)</div>';
+  const d=await api('/api/wizard/parse',{method:'POST',body:JSON.stringify({input})});
+  if(!d.ok){document.getElementById('wizOut').innerHTML=`<div class="wiz-err">${esc(d.error)}</div>`;return}
+  wizSuggestion=d.suggestion;
+  document.getElementById('wizOut').innerHTML=`
+    <div class="wiz-result">
+      <div class="row"><span>平台:</span><b>${esc(d.suggestion.mode_label)}</b>
+        <span style="color:var(--dim)">${esc(d.suggestion.platform)}</span></div>
+      <div class="row"><span>标识:</span><code>${esc(d.suggestion.platform_uid)}</code></div>
+      ${d.suggestion.note?`<div class="row" style="color:var(--gold)">⚠ ${esc(d.suggestion.note)}</div>`:''}
+      <div class="row"><span>名字:</span><input type="text" id="wizName" value="${esc(d.suggestion.suggested_name)}" style="flex:1"></div>
+      <div style="margin-top:8px"><button class="btn primary" onclick="wizConfirm()">✔ 确认加入并自动扫描</button></div>
+    </div>`;
+}
+async function wizConfirm(){
+  if(!wizSuggestion)return;
+  const name=document.getElementById('wizName').value.trim();
+  if(!name){toast('名字不能为空');return}
+  const d=await api('/api/creators',{method:'POST',body:JSON.stringify({
+    platform:wizSuggestion.platform,platform_uid:wizSuggestion.platform_uid,name,
+    url:wizSuggestion.url||'',note:wizSuggestion.note||''})});
+  if(!d.ok){toast(`添加失败:${d.error}`);return}
+  toast(`已加入「${name}」,已自动触发扫描`);
+  document.getElementById('wizInput').value='';document.getElementById('wizOut').innerHTML='';wizSuggestion=null;
+  loadAll();setTimeout(loadScanlogs,6000);
+}
+async function delCreator(id){
+  if(!confirm('确定移除这位博主?(其已入库内容保留)'))return;
+  const d=await api(`/api/creators/${id}`,{method:'DELETE'});
+  toast(d.ok?'已移除':`失败:${d.error}`);loadAll();
+}
+async function toggleCreator(id,enabled){
+  const d=await api(`/api/creators/${id}/toggle`,{method:'POST'});
+  if(d.ok){toast(d.enabled?'已启用,下一轮恢复扫描':'已停用,扫描将跳过');loadCreators();loadStatus()}
+}
+function toggleManual(id){manualOpenId=(manualOpenId===id?null:id);loadCreators()}
+async function submitManual(id){
+  const title=document.getElementById(`mTitle-${id}`).value.trim();
+  const url=document.getElementById(`mUrl-${id}`).value.trim();
+  if(!title){toast('标题必填');return}
+  const d=await api('/api/items/manual',{method:'POST',body:JSON.stringify({creator_id:id,title,url})});
+  if(!d.ok){toast(`登记失败:${d.error}`);return}
+  toast(`已登记并通知 · 分类 #${d.tag}(${d.classifier==='ai'?'AI':'规则'})`);
+  manualOpenId=null;loadAll();
+}
+
+buildNav();
+try{if(localStorage.getItem('radar_nav_collapsed')==='1')document.body.classList.add('rnav-collapsed')}catch(e){}
+let _initView='stream';try{_initView=localStorage.getItem('radar_view')||'stream'}catch(e){}
+switchView(_initView);
+loadAll();
+connectSSE();
+setInterval(()=>{if(manualOpenId===null&&!sseLive)loadAll()},30000);
+</script>
+</body>
+</html>
