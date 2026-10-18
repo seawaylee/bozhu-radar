@@ -319,9 +319,45 @@ def refresh_xhs() -> int:
     return total
 
 
+
+def refresh_gzh() -> int:
+    """公众号「我的关注」= 微信读书书架里的公众号(bookId MP_ 前缀;werss 同款 shelf/sync)。
+    ⚠️ userVid 必须传空串,非空反而 -2012(werss 实测坑)。"""
+    from .adapters import gzh as g
+    import requests as rq
+    header = g._cookie_header()
+    s = rq.Session(); s.trust_env = False
+    r = s.get("https://weread.qq.com/web/shelf/sync",
+              params={"userVid": "", "synckey": 0, "lectureSynckey": 0},
+              headers={"Cookie": header, "User-Agent": g.UA,
+                       "Accept": "application/json, text/plain, */*",
+                       "Origin": "https://weread.qq.com", "Referer": "https://weread.qq.com/"},
+              timeout=20)
+    try:
+        payload = r.json()
+    except Exception as exc:
+        raise AdapterError(f"书架接口非 JSON(HTTP {r.status_code}):登录可能失效") from exc
+    code = int(payload.get("errCode") or 0)
+    if code in (-2012, -2010):
+        raise AdapterError("公众号:微信读书登录已失效,请到「身份与登录」重新扫码")
+    if code != 0:
+        raise AdapterError(f"书架接口错误 errCode={code}")
+    mps = [b for b in payload.get("books") or [] if str(b.get("bookId", "")).startswith("MP_")]
+    total = 0
+    for b in mps:
+        bid = str(b.get("bookId"))
+        if bid:
+            db.upsert_following("gzh", bid, b.get("title") or bid,
+                                (b.get("intro") or b.get("author") or "")[:50])
+            total += 1
+    if not total:
+        raise AdapterError("书架上没有公众号(在微信读书 App 里订阅公众号后会进书架;订阅几个再来导入)")
+    db.meta_set("following:gzh:fetched_at", db.now_iso())
+    return total
+
 def refresh(platform: str) -> int:
     handler = {"douyin": refresh_douyin, "weibo": refresh_weibo, "youtube": refresh_youtube,
-               "bilibili": refresh_bilibili, "xhs": refresh_xhs}.get(platform)
+               "bilibili": refresh_bilibili, "xhs": refresh_xhs, "gzh": refresh_gzh}.get(platform)
     if not handler:
         raise AdapterError("该平台暂不支持拉取关注列表")
     try:

@@ -317,7 +317,7 @@ footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:24px;line-
         <div class="chrow"><b>抖音</b><span class="m auto">全自动</span><span class="d">内容=匿名 share 页+拦截页内接口;扫码登录后可拉关注列表批量添加</span></div>
         <div class="chrow"><b>小红书</b><span class="m semi">受限</span><span class="d">平台风控最严(10-19 穷举实测):弹窗扫码手机成功但 web 会话不下发;Chrome 登录态与设备指纹绑定,导入即「安全限制」——自动登录暂不可用,属进阶内容</span></div>
         <div class="chrow"><b>视频号</b><span class="m semi">半自动</span><span class="d">完全封闭在微信客户端内:无网页版、无公开接口、无扫码登录入口——手动登记是诚实天花板</span></div>
-        <div class="chrow"><b>公众号</b><span class="m semi">半自动</span><span class="d">无公开订阅接口,web 侧无稳定免登录出口——手动登记</span></div>
+        <div class="chrow"><b>公众号</b><span class="m auto">全自动</span><span class="d">微信读书通道(werss 同款):扫码登录(微信扫一扫)→「我的关注」导入书架公众号或名字搜索 → 文章全自动;每日有读取配额</span></div>
       </div>
   </section>
 
@@ -415,7 +415,7 @@ function toggleNav(){
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3000)}
 async function api(path,opts){const r=await fetch(path,Object.assign({headers:{'Content-Type':'application/json'}},opts||{}));return r.json()}
 const MODE_LABEL={auto:'全自动',semi:'半自动'};
-const ID_LABEL={douyin:'抖音',weibo:'微博',xhs:'小红书',youtube:'YouTube',bilibili:'B站'};
+const ID_LABEL={douyin:'抖音',weibo:'微博',xhs:'小红书',youtube:'YouTube',bilibili:'B站',gzh:'公众号'};
 
 function fmtTime(iso){
   if(!iso)return'';

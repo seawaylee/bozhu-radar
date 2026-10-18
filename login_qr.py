@@ -23,6 +23,12 @@ IDENT_DIR = BASE / "data" / "identity"
 PLATFORMS = {
     "douyin": {"url": "https://www.douyin.com/", "login_cookie": "sessionid",
                "tip": "在弹出的窗口里点右上角「登录」→ 扫码(窗口会等到真登录完成才关闭)"},
+    "gzh": {"url": "https://weread.qq.com/", "login_cookie": "wr_skey",
+            # 地面真值:页内问书架接口 errCode==0 才算登录(werss 同款坑:userVid 必须空串)
+            "verify": "async () => { try { const r = await fetch('/web/shelf/sync?userVid=&synckey=0', "
+                      "{headers: {'Accept': 'application/json'}}); const d = await r.json(); "
+                      "return d.errCode === 0; } catch(e) { return false } }",
+            "tip": "在弹出的窗口里登录微信读书(微信扫一扫即可,不需要公众号后台),扫完等页面出现书架"},
     "bilibili": {"url": "https://www.bilibili.com/", "login_cookie": "SESSDATA",
                  # SESSDATA/DedeUserID 都是登录后才有的 cookie(游客没有);双 cookie 互为指纹
                  "also_cookie": "DedeUserID",
@@ -195,8 +201,8 @@ def _qr_flow(platform: str, conf: dict) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) != 2 or sys.argv[1] not in ("douyin", "weibo", "xhs", "youtube", "bilibili"):
-        print("用法: python login_qr.py <douyin|weibo|xhs|youtube|bilibili>")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("douyin", "weibo", "xhs", "youtube", "bilibili", "gzh"):
+        print("用法: python login_qr.py <douyin|weibo|xhs|youtube|bilibili|gzh>")
         return 2
     platform = sys.argv[1]
     if platform == "youtube":

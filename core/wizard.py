@@ -178,8 +178,46 @@ def parse(text: str) -> dict:
         return _resolve_douyin(text)
     if platform == "xhs":
         return _resolve_xhs(text)
+    if platform == "gzh":
+        return _resolve_gzh(text)
     return _resolve_manual(text, platform)
 
+
+
+def _resolve_gzh(text: str) -> dict:
+    """公众号:微信读书通道。支持 ①「公众号:名字」weread 搜索(需登录)
+    ②直接粘 weread 公众号 bookId(MP_WXS_ 数字或裸数字)。"""
+    from .adapters import gzh as gzh_adapter
+    m = re.search(r"MP_WXS_(\d+)", text)
+    if m:
+        book_id = f"MP_WXS_{m.group(1)}"
+    elif re.fullmatch(r"\d{5,}", text.strip()):
+        book_id = f"MP_WXS_{text.strip()}"
+    else:
+        nm = re.search(r"公众号[:：]?\s*(.+)", text)
+        kw = (nm.group(1).strip() if nm else text).strip()
+        if not kw:
+            raise AdapterError("公众号输入为空")
+        try:
+            hits = gzh_adapter.search_mp(kw)
+        except AdapterError as exc:
+            raise AdapterError(f"{exc}(名字搜索需要先扫码;也可以直接粘 MP_WXS_ 编号)") from exc
+        if not hits:
+            raise AdapterError(f"微信读书里搜不到「{kw}」的公众号(只有书?);"
+                               "试试公众号全名,或从「我的关注」导入书架里已订阅的公众号")
+        best = next((h for h in hits if kw in h["title"]), hits[0])
+        return {"platform": "gzh", "platform_uid": best["book_id"],
+                "suggested_name": best["title"], "url": "",
+                "note": f"微信读书命中 {len(hits)} 个,已选:{best['title']}"
+                        + (f"({best['author']})" if best['author'] else "")}
+    name = ""
+    try:
+        name = gzh_adapter.GzhAdapter().creator_name(book_id) or ""
+    except Exception:
+        pass
+    return {"platform": "gzh", "platform_uid": book_id,
+            "suggested_name": name or f"公众号{book_id[-6:]}", "url": "",
+            "note": "已按微信读书编号识别" + (";" + name if name else "")}
 
 def time_beijing_iso(ts: int | float | None) -> str | None:
     if not ts:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .bilibili import BilibiliAdapter
 from .douyin import DouyinAdapter
+from .gzh import GzhAdapter
 from .manual import ManualAdapter
 from .weibo import WeiboAdapter
 from .youtube import YoutubeAdapter
@@ -13,7 +14,7 @@ ADAPTERS: dict[str, BaseAdapter] = {
     "bilibili": BilibiliAdapter(),
     "weibo": WeiboAdapter(),
     "douyin": DouyinAdapter(),
-    "gzh": ManualAdapter("gzh", "semi"),
+    "gzh": GzhAdapter(),
     "xhs": ManualAdapter("xhs", "semi"),
     "sph": ManualAdapter("sph", "semi"),
 }

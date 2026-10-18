@@ -28,3 +28,6 @@ notify:
     macos: {enabled: false}                # 置 true 弹 macOS 系统通知
     feishu_bot: {enabled: false, webhook: ""}   # 填自定义机器人 webhook 后置 true
     feishu_app: {enabled: false, app_id: "", app_secret: "", open_id: ""}  # 自建应用通道(教学进阶)
+
+wechat_mp:
+  cookie: ""   # 微信读书 Cookie(weread.qq.com 登录后 F12 复制整串);面板扫码登录后可留空

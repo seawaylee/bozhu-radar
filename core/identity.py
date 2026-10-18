@@ -12,7 +12,7 @@ from pathlib import Path
 from . import db
 
 IDENT_DIR = Path(__file__).resolve().parents[1] / "data" / "identity"
-SUPPORTED = ("douyin", "weibo", "xhs", "youtube", "bilibili")
+SUPPORTED = ("douyin", "weibo", "xhs", "youtube", "bilibili", "gzh")
 
 
 def state_path(platform: str) -> Path:

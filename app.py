@@ -92,8 +92,8 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(url.query)
             platform = (q.get("platform") or [""])[0]
             keyword = (q.get("q") or [""])[0]
-            if platform not in ("douyin", "weibo", "youtube", "bilibili", "xhs"):
-                self._error("platform 必须是 douyin / weibo / youtube / bilibili / xhs")
+            if platform not in ("douyin", "weibo", "youtube", "bilibili", "xhs", "gzh"):
+                self._error("platform 必须是 douyin / weibo / youtube / bilibili / xhs / gzh")
                 return
             self._json({"ok": True, "items": following.list_following(platform, keyword),
                         "total": db.following_count(platform)})
