@@ -315,7 +315,7 @@ footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:24px;line-
         <div class="chrow"><b>B站</b><span class="m auto">全自动</span><span class="d">内容=免签名空间接口(big_v 同款);关注导入=点「扫码登录」弹浏览器窗口扫码(和其他平台一致),登录后一键拉取</span></div>
         <div class="chrow"><b>微博</b><span class="m auto">全自动</span><span class="d">桌面 ajax;点「扫码登录」会打开你的主 Chrome——在里面登录微博后自动导入成熟会话(扫码新会话会被软风控,主 Chrome 登录态不受伤)</span></div>
         <div class="chrow"><b>抖音</b><span class="m auto">全自动</span><span class="d">内容=匿名 share 页+拦截页内接口;扫码登录后可拉关注列表批量添加</span></div>
-        <div class="chrow"><b>小红书</b><span class="m semi">受限</span><span class="d">web 接口带设备盾签名;扫码登录态易过期(10-18 已失效待重扫),关注列表=浏览器内开弹窗拦截通道,重扫后可用</span></div>
+        <div class="chrow"><b>小红书</b><span class="m semi">受限</span><span class="d">平台风控最严(10-19 穷举实测):弹窗扫码手机成功但 web 会话不下发;Chrome 登录态与设备指纹绑定,导入即「安全限制」——自动登录暂不可用,属进阶内容</span></div>
         <div class="chrow"><b>视频号</b><span class="m semi">半自动</span><span class="d">完全封闭在微信客户端内:无网页版、无公开接口、无扫码登录入口——手动登记是诚实天花板</span></div>
         <div class="chrow"><b>公众号</b><span class="m semi">半自动</span><span class="d">无公开订阅接口,web 侧无稳定免登录出口——手动登记</span></div>
       </div>
@@ -404,6 +404,7 @@ function switchView(k){
   document.body.classList.remove('rnav-open');
   if(k==='notify'){const b=document.getElementById('notiBdg');if(b)b.classList.remove('show')}
   if(k==='following'&&!importData.list.length)openImport();
+  if(k==='identity')loadIdentity();
   window.scrollTo(0,0);
 }
 function toggleNav(){

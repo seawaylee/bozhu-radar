@@ -23,25 +23,12 @@ IDENT_DIR = BASE / "data" / "identity"
 PLATFORMS = {
     "douyin": {"url": "https://www.douyin.com/", "login_cookie": "sessionid",
                "tip": "在弹出的窗口里点右上角「登录」→ 扫码(窗口会等到真登录完成才关闭)"},
-    "weibo": {"url": "https://weibo.com/", "login_cookie": "SUBP",
-              # ⚠️ 游客一打开页面就有 SUBP(2026-10-18 实测),只看 cookie 名会秒误判→窗口提前关+存下游客会话;
-              # 必须叠加页面指纹:$CONFIG['uid'] 仅登录后有值(游客='')
-              "verify": "() => { try { const u = String((window.$CONFIG||{})['uid']||''); "
-                        "return u !== '' && u !== '0'; } catch(e) { return false; } }",
-              "tip": "在弹出的窗口里点「扫码登录」,扫完等页面出现你的头像(游客 cookie 也会触发,窗口只认真登录)"},
-    "xhs": {"url": "https://www.xiaohongshu.com/", "login_cookie": "web_session",
-            # ⚠️ 头像链接指纹会误判(2026-10-19 实锤:点「登录」弹窗后页面就有 /user/profile/ 链接,
-            # 两次秒判"登录成功"关窗,用户还没扫码)。地面真值=页内问 /user/me:游客必返 guest:true。
-            "verify": "async () => { try { const r = await fetch('/api/sns/web/v2/user/me', "
-                      "{headers: {'Accept': 'application/json'}}); const d = await r.json(); "
-                      "const u = d.data || {}; return u.guest === false && !!u.user_id; "
-                      "} catch(e) { return false } }",
-            "tip": "在弹出的窗口里点「登录」→ 扫码并在手机上确认,窗口只认真登录"},
     "bilibili": {"url": "https://www.bilibili.com/", "login_cookie": "SESSDATA",
                  # SESSDATA/DedeUserID 都是登录后才有的 cookie(游客没有);双 cookie 互为指纹
                  "also_cookie": "DedeUserID",
                  "tip": "在弹出的窗口里点右上角「登录」→ 扫码,扫完等右上角出现你的头像"},
 }
+# weibo/xhs/youtube 不走弹窗:统一「主 Chrome 登录导入」(chrome_import)
 TIMEOUT_SEC = 240
 
 
@@ -128,6 +115,16 @@ def weibo_from_chrome() -> int:
     return 1
 
 
+def xhs_from_chrome() -> int:
+    """小红书终定性(2026-10-19 深夜实测穷举):①弹窗扫码——手机显示成功,web 会话不下发;
+    ②Chrome cookie 导入——会话与设备指纹绑定,带进 Playwright 即「安全限制」页+guest
+    (丢掉 a1/webId 重铸设备 id 也一样)。平台级风控,自动登录暂不可用,属进阶内容。"""
+    write_status("xhs", "stale",
+                 "平台风控受限:扫码会话不下发、Chrome 导入被设备指纹拦(实测穷举)——自动登录暂不可用,属进阶内容")
+    print("[xhs] 平台风控受限,自动登录暂不可用(扫码不下发/Chrome 导入被指纹拦)")
+    return 1
+
+
 def _safe_goto(page, url: str) -> bool:
     """页面打开带降级:先等 domcontentloaded(45s),超时就降级只等导航开始(commit)+8s 静置。
     小红书等站风控会挂起页面让 domcontentloaded 永不触发(2026-10-19 实测闪退根因)。"""
@@ -149,6 +146,19 @@ def _qr_flow(platform: str, conf: dict) -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, args=["--no-proxy-server"])
         ctx = browser.new_context(viewport={"width": 1100, "height": 800})
+        if platform == "bilibili":  # buvid3/4 暖场:裸指纹首访 bilibili 首页会被风控挂起→白屏(2026-10-19)
+            try:
+                from curl_cffi import requests as creq
+                spi = creq.Session(impersonate="chrome").get(
+                    "https://api.bilibili.com/x/frontend/finger/spi",
+                    headers={"Referer": "https://www.bilibili.com/"}, timeout=10).json()
+                d = spi.get("data") or {}
+                for src, name in (("b_3", "buvid3"), ("b_4", "buvid4")):
+                    if d.get(src):
+                        ctx.add_cookies([{"name": name, "value": d[src],
+                                          "domain": ".bilibili.com", "path": "/"}])
+            except Exception:
+                pass
         page = ctx.new_page()
         if not _safe_goto(page, conf["url"]):
             browser.close()
@@ -193,6 +203,8 @@ def main() -> int:
         return youtube_from_chrome()
     if platform == "weibo":
         return weibo_from_chrome()
+    if platform == "xhs":
+        return xhs_from_chrome()
     conf = PLATFORMS[platform]
     write_status(platform, "waiting", conf["tip"])
     print(f"[{platform}] 打开浏览器:{conf['url']}  → {conf['tip']}")

@@ -314,6 +314,7 @@ class Handler(BaseHTTPRequestHandler):
         tip_by_platform = {
             "youtube": "已打开你的主 Chrome:确认 YouTube 是登录状态即可,不用扫码(240 秒超时)",
             "weibo": "已打开你的主 Chrome:在里面登录微博(扫码/短信都行)——成熟会话比弹窗扫码稳,登录着就行",
+            "xhs": "小红书平台风控受限:扫码会话不下发、Chrome 导入被设备指纹拦(实测)——自动登录暂不可用,属进阶内容",
         }
         tip = tip_by_platform.get(platform,
                                   "浏览器窗口已打开:在里面点登录→扫码;完成后这里自动变绿(240 秒超时)")
