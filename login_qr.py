@@ -22,13 +22,19 @@ IDENT_DIR = BASE / "data" / "identity"
 
 PLATFORMS = {
     "douyin": {"url": "https://www.douyin.com/", "login_cookie": "sessionid",
-               "tip": "在弹出的窗口里点右上角「登录」→ 扫码"},
+               "tip": "在弹出的窗口里点右上角「登录」→ 扫码(窗口会等到真登录完成才关闭)"},
     "weibo": {"url": "https://weibo.com/", "login_cookie": "SUBP",
-              "tip": "在弹出的窗口里点「扫码登录」(弹窗默认就是二维码)"},
+              # ⚠️ 游客一打开页面就有 SUBP(2026-10-18 实测),只看 cookie 名会秒误判→窗口提前关+存下游客会话;
+              # 必须叠加页面指纹:$CONFIG['uid'] 仅登录后有值(游客='')
+              "verify": "() => { try { const u = String((window.$CONFIG||{})['uid']||''); "
+                        "return u !== '' && u !== '0'; } catch(e) { return false; } }",
+              "tip": "在弹出的窗口里点「扫码登录」,扫完等页面出现你的头像(游客 cookie 也会触发,窗口只认真登录)"},
     "xhs": {"url": "https://www.xiaohongshu.com/", "login_cookie": "web_session",
-            "tip": "在弹出的窗口里点「登录」→ 扫码"},
+            # 游客无 web_session,但登录流程中间态可能短暂出现:叠加侧栏头像指纹 + 连续两次确认
+            "verify": "() => !!document.querySelector('a[href*=\"/user/profile/\"]')",
+            "tip": "在弹出的窗口里点「登录」→ 扫码,扫完等侧栏出现你的头像(窗口只认真登录)"},
     "youtube": {"url": "https://www.youtube.com/", "login_cookie": "SAPISID",
-                "tip": "在弹出的窗口里登录你的 Google 账号(邮箱密码/手机一键登录,不一定是二维码)",
+                "tip": "已改走主 Chrome 导入(此条目仅为兜底保留)",
                 "proxy": True},
 }
 TIMEOUT_SEC = 240
@@ -59,6 +65,25 @@ def youtube_from_chrome() -> int:
     return 1
 
 
+def _looks_logged_in(ctx, page, conf) -> bool:
+    """cookie 出现 + 平台页面指纹(verify_js)双条件;连续两次确认由调用方负责(防登录中间态)。"""
+    try:
+        values = {c["name"]: c.get("value") or "" for c in ctx.cookies()}
+    except Exception:
+        return False
+    v = values.get(conf["login_cookie"]) or ""
+    if not v or len(v) < 8:  # 空/短值当没有(游客态与中间态)
+        return False
+    js = conf.get("verify")
+    if js:
+        try:
+            if not page.evaluate(js):
+                return False
+        except Exception:
+            return False
+    return True
+
+
 def main() -> int:
     if len(sys.argv) != 2 or sys.argv[1] not in PLATFORMS:
         print("用法: python login_qr.py <douyin|weibo|xhs|youtube>")
@@ -85,15 +110,15 @@ def main() -> int:
         page = ctx.new_page()
         page.goto(conf["url"], wait_until="domcontentloaded", timeout=45000)
         deadline = time.time() + TIMEOUT_SEC
-        ok = False
+        ok, streak = False, 0
         while time.time() < deadline:
-            try:
-                names = {c["name"] for c in ctx.cookies()}
-            except Exception:
-                names = set()
-            if conf["login_cookie"] in names:
-                ok = True
-                break
+            if _looks_logged_in(ctx, page, conf):
+                streak += 1
+                if streak >= 2:  # 连续两次(约4秒)才算数,躲登录流程的中间态
+                    ok = True
+                    break
+            else:
+                streak = 0
             time.sleep(2)
         if ok:
             # 暖场:登录成功后访问一次平台主页,让主域 cookie 落全、会话成熟(防"新会话软风控")
