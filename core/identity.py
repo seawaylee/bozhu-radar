@@ -117,6 +117,8 @@ def bilibili_qr_poll(qrcode_key: str) -> dict:
     data = payload.get("data") or {}
     code = data.get("code")
     if code != 0:
+        if code == 86038:  # 二维码过期:waiting 状态收掉,身份行回「未登录」
+            write_status("bilibili", "timeout", "二维码已过期,重新点扫码生成新的")
         return {"ok": False, "code": code, "message": _BILI_POLL_MSG.get(code, f"状态码 {code}")}
     cookie_url = data.get("url") or ""  # 成功时登录 cookie 全拼在这个 url 的查询参数里
     query = parse_qs(urlparse(cookie_url).query)

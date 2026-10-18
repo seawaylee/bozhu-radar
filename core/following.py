@@ -315,17 +315,21 @@ def refresh_xhs() -> int:
 
 
 def refresh(platform: str) -> int:
-    if platform == "douyin":
-        return refresh_douyin()
-    if platform == "weibo":
-        return refresh_weibo()
-    if platform == "youtube":
-        return refresh_youtube()
-    if platform == "bilibili":
-        return refresh_bilibili()
-    if platform == "xhs":
-        return refresh_xhs()
-    raise AdapterError("该平台暂不支持拉取关注列表")
+    handler = {"douyin": refresh_douyin, "weibo": refresh_weibo, "youtube": refresh_youtube,
+               "bilibili": refresh_bilibili, "xhs": refresh_xhs}.get(platform)
+    if not handler:
+        raise AdapterError("该平台暂不支持拉取关注列表")
+    try:
+        count = handler()
+    except AdapterError as exc:
+        msg = str(exc)
+        # 有登录文件但被服务端拒绝(失效/访客/软风控)→ 状态灯转红;从没登录过的不写(保持「未登录」)
+        if identity.state_path(platform).exists() and any(
+                k in msg for k in ("失效", "访客", "软风控", "拒绝服务")):
+            identity.write_status(platform, "stale", msg[:60])
+        raise
+    identity.write_status(platform, "ok", f"关注列表拉取成功({count} 位)")
+    return count
 
 
 def list_following(platform: str, q: str = "", limit: int = 400) -> list[dict]:

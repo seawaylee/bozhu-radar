@@ -103,6 +103,7 @@ select:focus,input:focus{border-color:rgba(26,110,224,.55)}
 .idrow:last-child{border-bottom:none}
 .idrow .st-dot{width:9px;height:9px;border-radius:50%;flex:none;background:#c7cedb}
 .idrow .st-dot.ok{background:var(--teal);box-shadow:0 0 0 3px rgba(15,118,110,.12)}
+.idrow .st-dot.bad{background:#b3261e;box-shadow:0 0 0 3px rgba(179,38,30,.12)}
 .idrow .st-dot.waiting{background:var(--gold);box-shadow:0 0 0 3px rgba(160,110,8,.15);animation:blink 1.2s infinite}
 .idrow .nm{font-weight:650;width:52px}
 .idrow .stat{color:var(--dim);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -204,6 +205,12 @@ body.rnav-collapsed .rmain{margin-left:52px}
 #modal.show{display:flex}
 #biliqr{position:fixed;inset:0;background:rgba(28,36,48,.45);display:none;align-items:center;justify-content:center;z-index:110;padding:20px}
 #biliqr.show{display:flex}
+#pullmodal{position:fixed;inset:0;background:rgba(28,36,48,.45);display:none;align-items:center;justify-content:center;z-index:105;padding:20px}
+#pullmodal.show{display:flex}
+.pstat{font-size:12.5px;line-height:1.5;padding:10px 12px;border-radius:8px;background:var(--panel2);margin-top:10px;min-height:20px}
+.pstat.ok{color:var(--teal)}
+.pstat.bad{color:#b3261e}
+.pstat.run{color:var(--dim)}
 .mcard{background:#fff;border-radius:16px;box-shadow:var(--shadow-md);width:min(620px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
 .mhead{padding:14px 18px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
 .mhead b{font-size:15px}
@@ -320,7 +327,7 @@ footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:24px;line-
   <section class="view" id="view-following">
       <div class="card">
         <h3>我的关注 <span class="hint">拉取你的关注列表 → 搜索筛选 → 勾选批量加入监控;关注几百个≠全部监控,挑着来</span>
-          <span class="ops"><button class="btn ghost" id="fRefreshBtn" onclick="refreshFollowing(importData.platform,this)">⟳ 从平台拉取最新</button></span></h3>
+          <span class="ops"><button class="btn ghost" id="fRefreshBtn" onclick="openPullModal(importData.platform)">⟳ 从平台拉取最新</button></span></h3>
         <div class="fchips" id="fPlat"></div>
         <div class="filters"><input type="text" id="mSearch" style="flex:1" placeholder="输入名字筛选,如:财经 / 老纪 / 新闻…" oninput="renderImportList()"></div>
         <div class="items-head"><span id="fCount"></span></div>
@@ -358,6 +365,16 @@ footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:24px;line-
   </footer>
 </div>
 </div><!-- /rmain -->
+<div id="pullmodal"><div class="card" style="max-width:440px;width:100%">
+  <h3>拉取我的关注 <span class="hint">从平台重新拉一份你的关注列表</span></h3>
+  <div class="fchips" id="pullChips"></div>
+  <div id="pullStat" class="pstat run">选平台后点「开始拉取」</div>
+  <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">
+    <span id="pullActs" style="display:flex;gap:8px;flex:1"></span>
+    <button class="btn ghost" onclick="closePullModal()">关闭</button>
+    <button class="btn primary" id="pullGo" onclick="doPull()">开始拉取</button>
+  </div>
+</div></div>
 <div id="biliqr"></div>
 <div id="toast"></div>
 
@@ -462,12 +479,14 @@ async function loadIdentity(){
     const d=await api('/api/identity/status');identityCache=d.identities||[];
     document.getElementById('identity').innerHTML=identityCache.map(it=>{
       const waiting=it.login_state==='waiting';
-      const cls=it.logged_in?'ok':(waiting?'waiting':'');
-      const stat=it.logged_in?`已登录 · ${esc(it.saved_at||'')}`:(waiting?'等待扫码…':'未登录');
+      const stale=it.login_state==='stale';
+      const cls=stale?'bad':(it.logged_in?'ok':(waiting?'waiting':''));
+      const stat=stale?`已失效 · ${esc(it.login_detail||'请重新扫码')}`
+        :(it.logged_in?`已登录 · ${esc(it.saved_at||'')}`:(waiting?'等待扫码…':'未登录'));
       const ops=[];
       if(!it.logged_in)ops.push(`<button class="btn ghost" onclick="qrLogin('${it.platform}')">扫码登录</button>`);
       else{
-        ops.push(`<button class="btn ghost" onclick="refreshFollowing('${it.platform}')">拉取我的关注</button>`);
+        ops.push(`<button class="btn ghost" onclick="openPullModal('${it.platform}')">拉取我的关注</button>`);
         ops.push(`<button class="btn ghost" onclick="qrLogin('${it.platform}')">重新扫码</button>`);
       }
       return `<div class="idrow"><span class="st-dot ${cls}"></span><span class="nm">${ID_LABEL[it.platform]||it.platform}</span>
@@ -514,23 +533,52 @@ function biliQrClose(){
   const m=document.getElementById('biliqr');
   m.classList.remove('show');m.innerHTML='';
 }
-async function refreshFollowing(platform,btn){
-  if(!platform||window._followingBusy)return;
-  window._followingBusy=true;
-  const old=btn?btn.textContent:'';
-  if(btn){btn.disabled=true;btn.textContent='拉取中…'}
-  toast(`正在从${ID_LABEL[platform]||platform}拉取关注列表…(几十个关注约几秒;小红书走浏览器会久一点)`);
+/* 拉取我的关注:统一弹窗(选平台→拉取→结果+下一步入口),失败信息留得住 */
+let pullData={platform:'douyin',busy:false};
+function openPullModal(platform){
+  pullData.platform=platform||importData.platform
+    ||((identityCache.find(i=>i.logged_in&&i.login_state!=='stale')||{}).platform)||'douyin';
+  document.getElementById('pullStat').className='pstat run';
+  document.getElementById('pullStat').textContent='选平台后点「开始拉取」';
+  document.getElementById('pullActs').innerHTML='';
+  document.getElementById('pullmodal').classList.add('show');
+  renderPullModal();
+}
+function closePullModal(){document.getElementById('pullmodal').classList.remove('show')}
+function pullStateLabel(it){
+  if(it.login_state==='stale')return '已失效';
+  if(it.logged_in)return it.following_count?`已拉 ${it.following_count} 位`:'已登录';
+  return it.login_state==='waiting'?'等待扫码':'未登录';
+}
+function renderPullModal(){
+  document.getElementById('pullChips').innerHTML=identityCache.map(it=>
+    `<button class="btn ${pullData.platform===it.platform?'on':''}" onclick="pullData.platform='${it.platform}';renderPullModal()">${ID_LABEL[it.platform]||it.platform} · ${pullStateLabel(it)}</button>`).join('');
+  const go=document.getElementById('pullGo');
+  go.disabled=pullData.busy;go.textContent=pullData.busy?'拉取中…':'开始拉取';
+}
+async function doPull(){
+  if(pullData.busy)return;
+  pullData.busy=true;renderPullModal();
+  const st=document.getElementById('pullStat');
+  st.className='pstat run';
+  st.textContent=`正在从${ID_LABEL[pullData.platform]||pullData.platform}拉取…(几十个关注约几秒;小红书走浏览器会久一点)`;
+  document.getElementById('pullActs').innerHTML='';
   try{
-    const d=await api('/api/following/refresh',{method:'POST',body:JSON.stringify({platform})});
-    if(!d.ok){toast(`拉取失败:${d.error}`);return}
-    toast(`已拉取 ${d.count} 位关注,勾选后加入监控`);
-    loadIdentity();           // 刷新 chips 上的关注数
-    await openImport(platform);
-    if(!btn)switchView('following');   // 从「身份与登录」发起时拉完跳到本视图;本视图内刷新原地不动
-  }finally{
-    window._followingBusy=false;
-    if(btn){btn.disabled=false;btn.textContent=old}
-  }
+    const d=await api('/api/following/refresh',{method:'POST',body:JSON.stringify({platform:pullData.platform})});
+    if(!d.ok){
+      st.className='pstat bad';st.textContent=`拉取失败:${d.error}`;
+      const loginish=/失效|访客|软风控|扫码|登录|Cookie|cookie/.test(d.error||'');
+      document.getElementById('pullActs').innerHTML=(loginish
+        ?`<button class="btn primary" onclick="closePullModal();switchView('identity')">去「身份与登录」处理</button>`:'')
+        +`<button class="btn ghost" onclick="doPull()">重试</button>`;
+    }else{
+      st.className='pstat ok';st.textContent=`拉取成功:共 ${d.count} 位关注(列表已更新,去勾选加入监控)`;
+      document.getElementById('pullActs').innerHTML=
+        `<button class="btn primary" onclick="closePullModal();switchView('following');openImport('${pullData.platform}')">去勾选加入监控</button>`;
+      await openImport(pullData.platform);
+      loadIdentity().then(renderPullModal);
+    }
+  }finally{pullData.busy=false;renderPullModal()}
 }
 
 /* ---------- 我的关注(视图):拉取→搜索→勾选→批量加入 ---------- */
@@ -539,7 +587,7 @@ function renderFPlat(){
   const chips=(identityCache||[]).map(it=>{
     const on=importData.platform===it.platform;
     return `<button class="btn ${on?'on':''}" onclick="openImport('${it.platform}')">${ID_LABEL[it.platform]||it.platform}
-      ${it.logged_in?(it.following_count?` · ${it.following_count}`:''):' · 未登录'}</button>`;
+      ${it.logged_in?(it.login_state==='stale'?' · 已失效':(it.following_count?` · ${it.following_count}`:'')):' · 未登录'}</button>`;
   }).join('');
   document.getElementById('fPlat').innerHTML=chips||'<span class="hint">先到「身份与登录」扫码,再回来拉取关注</span>';
 }
