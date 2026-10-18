@@ -30,9 +30,13 @@ PLATFORMS = {
                         "return u !== '' && u !== '0'; } catch(e) { return false; } }",
               "tip": "在弹出的窗口里点「扫码登录」,扫完等页面出现你的头像(游客 cookie 也会触发,窗口只认真登录)"},
     "xhs": {"url": "https://www.xiaohongshu.com/", "login_cookie": "web_session",
-            # 游客无 web_session,但登录流程中间态可能短暂出现:叠加侧栏头像指纹 + 连续两次确认
-            "verify": "() => !!document.querySelector('a[href*=\"/user/profile/\"]')",
-            "tip": "在弹出的窗口里点「登录」→ 扫码,扫完等侧栏出现你的头像(窗口只认真登录)"},
+            # ⚠️ 头像链接指纹会误判(2026-10-19 实锤:点「登录」弹窗后页面就有 /user/profile/ 链接,
+            # 两次秒判"登录成功"关窗,用户还没扫码)。地面真值=页内问 /user/me:游客必返 guest:true。
+            "verify": "async () => { try { const r = await fetch('/api/sns/web/v2/user/me', "
+                      "{headers: {'Accept': 'application/json'}}); const d = await r.json(); "
+                      "const u = d.data || {}; return u.guest === false && !!u.user_id; "
+                      "} catch(e) { return false } }",
+            "tip": "在弹出的窗口里点「登录」→ 扫码并在手机上确认,窗口只认真登录"},
     "bilibili": {"url": "https://www.bilibili.com/", "login_cookie": "SESSDATA",
                  # SESSDATA/DedeUserID 都是登录后才有的 cookie(游客没有);双 cookie 互为指纹
                  "also_cookie": "DedeUserID",
