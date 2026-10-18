@@ -169,20 +169,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.api_items_manual(body))
             elif url.path == "/api/identity/login":
                 self._json(self.api_identity_login(body))
-            elif url.path == "/api/identity/bilibili/qr":
-                try:
-                    self._json({"ok": True, **identity.bilibili_qr_start()})
-                except Exception as exc:
-                    self._json({"ok": False, "error": str(exc)[:200]}, 200)
-            elif url.path == "/api/identity/bilibili/poll":
-                key = str(body.get("key") or "")
-                if not key:
-                    self._error("缺 key(二维码签发时返回的 qrcode_key)")
-                    return
-                try:
-                    self._json({"ok": True, **identity.bilibili_qr_poll(key)})
-                except Exception as exc:
-                    self._json({"ok": False, "error": str(exc)[:200]}, 200)
             elif url.path == "/api/following/refresh":
                 platform = str(body.get("platform") or "")
                 try:
@@ -314,11 +300,9 @@ class Handler(BaseHTTPRequestHandler):
         return {"ok": True, "item_id": iid, "tag": tag, "classifier": classifier}
 
     def api_identity_login(self, body: dict) -> dict:
-        """弹浏览器窗口扫码;交互式操作,窗口由用户当面使用后自动关闭。
-        B站不走这里:纯 HTTP 二维码内嵌面板(/api/identity/bilibili/qr)。"""
+        """抖音/小红书/B站:弹真浏览器窗口扫码(交互式,用户当面使用);
+        YouTube/微博:打开用户的主 Chrome 登录后导入成熟会话(不弹自动化窗口)。"""
         platform = str(body.get("platform") or "")
-        if platform == "bilibili":
-            return {"ok": False, "error": "B站用面板内嵌二维码:点扫码后直接扫屏幕上的图"}
         if platform not in identity.SUPPORTED:
             return {"ok": False, "error": "支持的平台:douyin / weibo / xhs / youtube / bilibili"}
         script = BASE_DIR / "login_qr.py"
@@ -327,9 +311,12 @@ class Handler(BaseHTTPRequestHandler):
         with open(log_path, "a", encoding="utf-8") as lf:
             subprocess.Popen([sys.executable, str(script), platform],
                              stdout=lf, stderr=lf, start_new_session=True)
-        tip = ("已打开你的主 Chrome:确认 YouTube 是登录状态即可,不用扫码(240 秒超时)"
-               if platform == "youtube"
-               else "浏览器窗口已打开:在里面点登录→扫码;完成后这里自动变绿(240 秒超时)")
+        tip_by_platform = {
+            "youtube": "已打开你的主 Chrome:确认 YouTube 是登录状态即可,不用扫码(240 秒超时)",
+            "weibo": "已打开你的主 Chrome:在里面登录微博(扫码/短信都行)——成熟会话比弹窗扫码稳,登录着就行",
+        }
+        tip = tip_by_platform.get(platform,
+                                  "浏览器窗口已打开:在里面点登录→扫码;完成后这里自动变绿(240 秒超时)")
         return {"ok": True, "tip": tip}
 
     def api_creators_bulk(self, body: dict) -> dict:

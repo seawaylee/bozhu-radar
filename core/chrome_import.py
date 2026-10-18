@@ -1,12 +1,13 @@
-"""从用户主 Chrome 导入 YouTube 登录态(2026-10-18 站长拍板「为什么不用我的主chrome」)。
+"""从用户主 Chrome 导入登录态(2026-10-18 站长拍板「为什么不用我的主 Chrome」)。
 
-背景:Google 登录页拦自动化浏览器——Playwright 弹窗里登录 Google 会报
-「此浏览器或应用可能不安全」,弹窗通道对 YouTube 走不通。
-改法:直接读主 Chrome 里现成的 youtube.com cookie(通常本来就登录着):
+背景:①Google 登录页拦自动化浏览器(Playwright 窗口报「此浏览器或应用可能不安全」);
+②微博扫码新会话被软风控——日常浏览器里的成熟登录态才是稳路(wu2198 同款)。
+所以 YouTube/微博 都走「主 Chrome 导入」:直接读 Chrome 里现成的站点 cookie。
 - macOS Chrome 的 cookie 值用 Keychain「Chrome Safe Storage」密钥 AES-128-CBC 加密(v10 前缀);
-- 全程本机解密,只写 data/identity/youtube.json,不外发不进日志。
-前置:运行进程要有 Chrome 目录的磁盘访问权限(macOS 隐私与安全性);
-首次读 Keychain 系统可能弹一次「允许」。
+- 全程本机解密,只写 data/identity/<platform>.json,不外发不进日志。
+前置:运行进程要有 Chrome 目录的磁盘访问权限;首次读 Keychain 可能要点一次「允许」。
+注意:Chrome 里的微博若是**未登录**的游客态,导出来也只是成熟游客 cookie(2026-10-18 实测
+$CONFIG.uid 为空)——需要用户先在自己的 Chrome 里登录微博,再导入。
 """
 from __future__ import annotations
 
@@ -55,7 +56,6 @@ def _decrypt(blob: bytes, key: bytes) -> str:
         return ""
     prefix = blob[:3]
     if prefix not in (b"v10", b"v11"):
-        # 老版 Chrome 明文存 utf-16 / 未加密
         try:
             return blob.decode("utf-8")
         except Exception:
@@ -68,7 +68,6 @@ def _decrypt(blob: bytes, key: bytes) -> str:
     pad = plain[-1]
     if 1 <= pad <= 16:
         plain = plain[:-pad]
-    # 部分新版本解密后带 32 字节 SHA256 摘要前缀:值不是合法 utf-8 就剥掉重试
     try:
         return plain.decode("utf-8")
     except UnicodeDecodeError:
@@ -85,29 +84,30 @@ def _chrome_epoch_to_unix(v) -> int:
     return int(v / 1_000_000) - 11644473600
 
 
-def extract_youtube_cookies(want_names: set[str] | None = None) -> list[dict]:
-    """读主 Chrome 全部 profile 的 youtube.com cookie(解密),返回 storage_state 的 cookies 列表。"""
+def extract_domain_cookies(host_suffix: str = "youtube.com",
+                           skip_names: tuple[str, ...] = ("XSRF-TOKEN", "X-CSRF-TOKEN")) -> list[dict]:
+    """读主 Chrome 全部 profile 指定域的 cookie(解密),返回 storage_state 的 cookies 列表。
+    XSRF 类 token 与请求绑定,拼旧值反而坏事,默认跳过。"""
     dbs = _cookie_dbs()
     if not dbs:
         raise RuntimeError("找不到 Chrome 的 Cookies 数据库(装的是别的浏览器?)")
     key = _aes_key()
-    names = want_names or None
-    cookies: dict[str, dict] = {}  # name+domain 去重,多 profile 取后见的
+    cookies: dict[str, dict] = {}
     for db in dbs:
         try:
             with tempfile.TemporaryDirectory() as td:
                 copy = Path(td) / "Cookies"
-                shutil.copy2(db, copy)  # Chrome 运行中也能读副本,避开库锁
+                shutil.copy2(db, copy)
                 conn = sqlite3.connect(f"file:{copy}?immutable=1", uri=True)
                 rows = conn.execute(
                     "SELECT host_key,name,encrypted_value,expires_utc,is_secure,is_httponly,path "
-                    "FROM cookies WHERE host_key LIKE '%youtube.com'").fetchall()
+                    "FROM cookies WHERE host_key LIKE ?", (f"%{host_suffix}",)).fetchall()
                 conn.close()
         except PermissionError as exc:
             raise RuntimeError("没有权限读 Chrome 目录:系统设置 → 隐私与安全性 → 磁盘访问权限,"
                                "给运行本服务的终端(ZCode/Terminal)打开后重试") from exc
         for host, name, enc, exp, secure, httponly, path in rows:
-            if names and name not in names:
+            if name in skip_names:
                 continue
             try:
                 value = _decrypt(bytes(enc), key)
@@ -126,15 +126,35 @@ def extract_youtube_cookies(want_names: set[str] | None = None) -> list[dict]:
     return list(cookies.values())
 
 
-def save_youtube_state(cookies: list[dict]) -> None:
+def save_state(platform: str, cookies: list[dict]) -> None:
     IDENT_DIR.mkdir(parents=True, exist_ok=True)
-    (IDENT_DIR / "youtube.json").write_text(
+    (IDENT_DIR / f"{platform}.json").write_text(
         json.dumps({"cookies": cookies, "origins": []}, ensure_ascii=False, indent=2),
         encoding="utf-8")
 
 
+def extract_youtube_cookies() -> list[dict]:
+    return extract_domain_cookies("youtube.com")
+
+
+def verify_weibo_uid(cookies: list[dict]) -> str:
+    """起无头真浏览器灌入候选 cookie,读 weibo.com 的 $CONFIG.uid——游客为空串,登录非空。
+    (cookie 名判断不可靠:游客也有 SUB/SUBP/SCF 全套,2026-10-18 实测)"""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch(headless=True, args=["--no-proxy-server"])
+        ctx = b.new_context(storage_state={"cookies": cookies, "origins": []},
+                            viewport={"width": 1280, "height": 850})
+        pg = ctx.new_page()
+        pg.goto("https://weibo.com/", wait_until="domcontentloaded", timeout=45000)
+        pg.wait_for_timeout(7000)
+        uid = pg.evaluate("() => { try { return String((window.$CONFIG||{})['uid']||'') } catch(e) { return '' } }")
+        b.close()
+    return uid or ""
+
+
 def wait_and_import(timeout_sec: int = 240) -> tuple[bool, int]:
-    """打开主 Chrome 到 YouTube(登录着就什么都不用做),轮询读 cookie 直到出现 SAPISID。"""
+    """YouTube:打开主 Chrome 到 YouTube(登录着就什么都不用做),轮询读 cookie 直到出现 SAPISID。"""
     subprocess.Popen(["open", "-a", "Google Chrome", "https://www.youtube.com/"])
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
@@ -144,7 +164,27 @@ def wait_and_import(timeout_sec: int = 240) -> tuple[bool, int]:
             print(f"[youtube] {exc}")
             return False, 0
         if any(c["name"] == "SAPISID" for c in cookies):
-            save_youtube_state(cookies)
+            save_state("youtube", cookies)
             return True, len(cookies)
         time.sleep(3)
     return False, 0
+
+
+def weibo_wait_and_import(timeout_sec: int = 240) -> tuple[bool, int, str]:
+    """微博:打开主 Chrome 到 weibo.com,用户在里面登录(比扫码会话成熟);
+    轮询读 cookie + 无头真浏览器验 uid,登录态坐实才存。"""
+    subprocess.Popen(["open", "-a", "Google Chrome", "https://weibo.com/"])
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        try:
+            cookies = extract_domain_cookies("weibo.com")
+        except RuntimeError as exc:
+            print(f"[weibo] {exc}")
+            return False, 0, ""
+        if cookies and any(c["name"] == "SUB" for c in cookies):
+            uid = verify_weibo_uid(cookies)
+            if uid:
+                save_state("weibo", cookies)
+                return True, len(cookies), uid
+        time.sleep(4)
+    return False, 0, ""

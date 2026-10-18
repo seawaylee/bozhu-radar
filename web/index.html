@@ -203,8 +203,6 @@ body.rnav-collapsed .rmain{margin-left:52px}
 /* 导入弹窗 */
 #modal{position:fixed;inset:0;background:rgba(28,36,48,.45);display:none;align-items:center;justify-content:center;z-index:100;padding:20px}
 #modal.show{display:flex}
-#biliqr{position:fixed;inset:0;background:rgba(28,36,48,.45);display:none;align-items:center;justify-content:center;z-index:110;padding:20px}
-#biliqr.show{display:flex}
 #pullmodal{position:fixed;inset:0;background:rgba(28,36,48,.45);display:none;align-items:center;justify-content:center;z-index:105;padding:20px}
 #pullmodal.show{display:flex}
 .pstat{font-size:12.5px;line-height:1.5;padding:10px 12px;border-radius:8px;background:var(--panel2);margin-top:10px;min-height:20px}
@@ -314,8 +312,8 @@ footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:24px;line-
       <div class="card">
         <h3>平台通道实况 <span class="hint">为什么有的平台全自动、有的受限——如实说</span></h3>
         <div class="chrow"><b>YouTube</b><span class="m auto">全自动</span><span class="d">yt-dlp 枚举频道(走代理);登录=直接导入你主 Chrome 的登录态(Google 会拦自动化浏览器弹窗,不走那条路);登录后可拉订阅列表批量添加</span></div>
-        <div class="chrow"><b>B站</b><span class="m auto">全自动</span><span class="d">内容=免签名空间接口(big_v 同款);关注导入=点「扫码登录」,二维码直接显示在面板里(纯 HTTP,不弹浏览器),登录后一键拉取</span></div>
-        <div class="chrow"><b>微博</b><span class="m auto">全自动</span><span class="d">桌面 ajax;扫码新会话会被微博软风控(养两天也不解,10-18 复测),浏览器成熟 Cookie 粘到 config.yaml weibo.cookie 即稳定</span></div>
+        <div class="chrow"><b>B站</b><span class="m auto">全自动</span><span class="d">内容=免签名空间接口(big_v 同款);关注导入=点「扫码登录」弹浏览器窗口扫码(和其他平台一致),登录后一键拉取</span></div>
+        <div class="chrow"><b>微博</b><span class="m auto">全自动</span><span class="d">桌面 ajax;点「扫码登录」会打开你的主 Chrome——在里面登录微博后自动导入成熟会话(扫码新会话会被软风控,主 Chrome 登录态不受伤)</span></div>
         <div class="chrow"><b>抖音</b><span class="m auto">全自动</span><span class="d">内容=匿名 share 页+拦截页内接口;扫码登录后可拉关注列表批量添加</span></div>
         <div class="chrow"><b>小红书</b><span class="m semi">受限</span><span class="d">web 接口带设备盾签名;扫码登录态易过期(10-18 已失效待重扫),关注列表=浏览器内开弹窗拦截通道,重扫后可用</span></div>
         <div class="chrow"><b>视频号</b><span class="m semi">半自动</span><span class="d">完全封闭在微信客户端内:无网页版、无公开接口、无扫码登录入口——手动登记是诚实天花板</span></div>
@@ -375,7 +373,6 @@ footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:24px;line-
     <button class="btn primary" id="pullGo" onclick="doPull()">开始拉取</button>
   </div>
 </div></div>
-<div id="biliqr"></div>
 <div id="toast"></div>
 
 <script>
@@ -500,38 +497,9 @@ async function loadIdentity(){
   }catch(e){console.error(e)}
 }
 async function qrLogin(platform){
-  if(platform==='bilibili'){biliQrStart();return}
   const d=await api('/api/identity/login',{method:'POST',body:JSON.stringify({platform})});
   toast(d.ok?d.tip:`失败:${d.error}`);
   setTimeout(loadIdentity,1500);loadIdentity();
-}
-/* B站:纯 HTTP 二维码,内嵌面板显示+轮询,不弹浏览器窗 */
-let biliQrTimer=null;
-async function biliQrStart(){
-  const d=await api('/api/identity/bilibili/qr',{method:'POST',body:'{}'});
-  if(!d.ok){toast(`B站二维码生成失败:${d.error}`);return}
-  const m=document.getElementById('biliqr');
-  m.classList.add('show');
-  m.innerHTML=`<div class="card" style="max-width:340px;text-align:center">
-    <h3 style="justify-content:center">B站扫码登录</h3>
-    <img src="${d.qr_png}" alt="B站登录二维码" style="width:240px;height:240px;margin:8px auto;border-radius:8px;border:1px solid #e4e0d8">
-    <div class="hint" id="biliQrStat">用 B站 App 首页右上角「扫一扫」扫这张图</div>
-    <button class="btn ghost" onclick="biliQrClose()">取消</button></div>`;
-  if(biliQrTimer)clearInterval(biliQrTimer);
-  biliQrTimer=setInterval(()=>biliQrPoll(d.qrcode_key),2500);
-}
-async function biliQrPoll(key){
-  const st=document.getElementById('biliQrStat');
-  const d=await api('/api/identity/bilibili/poll',{method:'POST',body:JSON.stringify({key})}).catch(()=>null);
-  if(!d)return;
-  if(d.ok){biliQrClose();toast('B站登录成功,可以拉取关注列表了');loadIdentity();return}
-  if(d.code===86038){biliQrClose();toast('二维码已过期,请重新生成');return}
-  if(st&&d.message)st.textContent=d.message;
-}
-function biliQrClose(){
-  if(biliQrTimer){clearInterval(biliQrTimer);biliQrTimer=null}
-  const m=document.getElementById('biliqr');
-  m.classList.remove('show');m.innerHTML='';
 }
 /* 拉取我的关注:统一弹窗(选平台→拉取→结果+下一步入口),失败信息留得住 */
 let pullData={platform:'douyin',busy:false};

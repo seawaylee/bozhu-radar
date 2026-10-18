@@ -4,8 +4,8 @@
   (签名模块为 Apache-2.0 开源算法副本 _douyin_abogus;纯接口,不碰浏览器)
 - B站:登录 cookie(SESSDATA)+ curl_cffi 指纹,走 /x/relation/followings
   (2026-10-18 实测该接口匿名 -101,必须登录;登录走面板内嵌二维码纯 HTTP 通道)
-- 微博:登录 cookie + weibo.com 桌面 ajax(wu2198 同款传输层);扫码新会话数据接口
-  持续软风控(2026-10-18 复测养两天仍「地址不存在」),config.yaml 成熟 cookie 可回退
+- 微博:主 Chrome 导入的成熟登录态(wu2198 同款会话),真浏览器内同源 fetch 拉关注
+  (python 直打会被 404 软风控/JS 挑战,2026-10-18 实测;扫码新会话同样被软风控)
 - 小红书:登录态起无头浏览器,开自己主页的关注弹窗,拦页内 followeduser 接口
   (浏览器自己带设备盾签名,2026-10-18 登录态失效待重扫,通道待实测)
 只拉列表用于「挑人」,监控仍按名单逐人抓——关注几百个不等于全部监控。
@@ -106,50 +106,55 @@ def refresh_douyin() -> int:
 
 
 def refresh_weibo() -> int:
-    header = identity.cookie_header("weibo")
-    if "SUBP" not in header:  # 扫码态优先;没有就回退 config.yaml 手粘的成熟 cookie(与内容通道同源)
-        header = str(config.load().get("weibo", {}).get("cookie") or "").strip()
-    if "SUBP" not in header:
-        raise AdapterError("请先扫码登录微博(身份与登录 → 扫码);"
-                           "或把浏览器成熟 Cookie 粘到 config.yaml weibo.cookie"
-                           "(扫码新会话会被微博软风控,成熟 cookie 不受影响)")
-    s = requests.Session()
-    s.trust_env = False
-    s.headers.update({"User-Agent": UA, "Accept": "application/json, text/plain, */*",
-                      "Referer": "https://weibo.com/"})
-    for chunk in header.split(";"):
-        if "=" in chunk:
-            name, value = chunk.strip().split("=", 1)
-            s.cookies.set(name, value, domain=".weibo.com")
-    r = s.get("https://weibo.com/ajax/profile/myinfo", timeout=15)
-    try:
-        mine = r.json()
-    except Exception:
-        mine = {}
-    my_uid = str((((mine.get("data") or {}).get("user")) or {}).get("id") or "")
-    if not my_uid:
-        # 2026-10-18 实测:扫码新会话调数据接口返回 {"ok":0,"message":"你访问的地址不存在"}(软风控),
-        # 养两天不解;成熟浏览器 cookie(粘 config.yaml weibo.cookie)不受影响
-        raise AdapterError("微博接口拒绝服务(扫码新会话被软风控,实测养两天也不解):"
-                           "把浏览器里登录微博的成熟 Cookie 粘到 config.yaml weibo.cookie 后再拉")
-    total, page = 0, 1
-    while page < 50:
-        payload = s.get("https://weibo.com/ajax/friendships/friends",
-                        params={"page": page, "uid": my_uid}, timeout=15).json()
-        data = payload.get("data") or {}
-        users = data.get("users") or []
-        if not users:
-            break
-        for u in users:
-            uid = str(u.get("id") or "")
-            if not uid:
-                continue
-            db.upsert_following("weibo", uid, u.get("screen_name") or uid,
-                                f"粉丝{u.get('followers_count', '?')} · {(u.get('description') or '')[:40]}")
-            total += 1
-        if data.get("hasmore") is False or not users:
-            break
-        page += 1
+    """微博关注:真浏览器内取数(python 直打 myinfo/friendships 会被 404 软风控,连 Chrome 成熟
+    cookie 也过不了首页 JS 挑战——2026-10-18 实测;浏览器上下文里同源 fetch 才是稳路)。"""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-proxy-server"])
+        if identity.state_path("weibo").exists():
+            ctx = browser.new_context(storage_state=str(identity.state_path("weibo")),
+                                      viewport={"width": 1280, "height": 850})
+        else:  # config.yaml 成熟 cookie 兜底:解析进浏览器上下文
+            header = str(config.load().get("weibo", {}).get("cookie") or "").strip()
+            if "SUBP" not in header:
+                browser.close()
+                raise AdapterError("微博登录态无效:到「身份与登录」点微博登录(会打开你的主 Chrome,"
+                                   "在里面登录后自动导入成熟会话)")
+            ctx = browser.new_context(viewport={"width": 1280, "height": 850})
+            ctx.add_cookies([{"name": k.strip(), "value": v.strip(), "domain": ".weibo.com", "path": "/"}
+                             for k, v in (chunk.split("=", 1) for chunk in header.split(";") if "=" in chunk)])
+        pg = ctx.new_page()
+        pg.goto("https://weibo.com/", wait_until="domcontentloaded", timeout=45000)
+        pg.wait_for_timeout(7000)  # 首页 JS 挑战+渲染要几秒
+        my_uid = pg.evaluate("() => { try { return String((window.$CONFIG||{})['uid']||'') } catch(e) { return '' } }")
+        if not my_uid or my_uid == "0":  # 游客/失效会话:uid 为空(2026-10-18 实测)
+            browser.close()
+            raise AdapterError("微博登录态已失效(浏览器里也是未登录):到「身份与登录」重新导入/登录")
+        total, page = 0, 1
+        while page <= 50:
+            payload = pg.evaluate("""async ([uid, page]) => {
+                const r = await fetch(`/ajax/friendships/friends?page=${page}&uid=${uid}`,
+                    {headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'}});
+                return await r.json();
+            }""", [my_uid, page])
+            # ⚠️ users/hasmore 在响应顶层(不在 data 下)——2026-10-18 实测,与抖音关注接口同款坑
+            users = payload.get("users") or (payload.get("data") or {}).get("users") or []
+            if not users:
+                break
+            for u in users:
+                uid_f = str(u.get("idstr") or u.get("id") or "")
+                if uid_f:
+                    db.upsert_following("weibo", uid_f, u.get("screen_name") or uid_f,
+                                        f"粉丝{u.get('followers_count', '?')} · {(u.get('description') or '')[:40]}")
+                    total += 1
+            if payload.get("hasmore") is False:
+                break
+            page += 1
+            time.sleep(1.0)
+        browser.close()
+    if not total:
+        raise AdapterError("微博拉到 0 条关注(接口拒绝或列表为空;重新导入登录态后再试)")
     db.meta_set("following:weibo:fetched_at", db.now_iso())
     return total
 
@@ -203,7 +208,7 @@ def refresh_youtube() -> int:
 def refresh_bilibili() -> int:
     ck = identity.load_cookies("bilibili") or {}
     if not ck.get("SESSDATA") or not ck.get("DedeUserID"):
-        raise AdapterError("请先扫码登录 B站(身份与登录 → 扫码,面板内嵌二维码)")
+        raise AdapterError("请先扫码登录 B站(身份与登录 → 扫码,会弹浏览器窗口)")
     mid = ck["DedeUserID"]
     from curl_cffi import requests as creq
     s = creq.Session(impersonate="chrome")

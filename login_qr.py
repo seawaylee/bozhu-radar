@@ -33,9 +33,10 @@ PLATFORMS = {
             # 游客无 web_session,但登录流程中间态可能短暂出现:叠加侧栏头像指纹 + 连续两次确认
             "verify": "() => !!document.querySelector('a[href*=\"/user/profile/\"]')",
             "tip": "在弹出的窗口里点「登录」→ 扫码,扫完等侧栏出现你的头像(窗口只认真登录)"},
-    "youtube": {"url": "https://www.youtube.com/", "login_cookie": "SAPISID",
-                "tip": "已改走主 Chrome 导入(此条目仅为兜底保留)",
-                "proxy": True},
+    "bilibili": {"url": "https://www.bilibili.com/", "login_cookie": "SESSDATA",
+                 # SESSDATA/DedeUserID 都是登录后才有的 cookie(游客没有);双 cookie 互为指纹
+                 "also_cookie": "DedeUserID",
+                 "tip": "在弹出的窗口里点右上角「登录」→ 扫码,扫完等右上角出现你的头像"},
 }
 TIMEOUT_SEC = 240
 
@@ -66,13 +67,16 @@ def youtube_from_chrome() -> int:
 
 
 def _looks_logged_in(ctx, page, conf) -> bool:
-    """cookie 出现 + 平台页面指纹(verify_js)双条件;连续两次确认由调用方负责(防登录中间态)。"""
+    """cookie 出现(+附加登录专属 cookie)+ 平台页面指纹(verify_js);连续两次确认由调用方负责。"""
     try:
         values = {c["name"]: c.get("value") or "" for c in ctx.cookies()}
     except Exception:
         return False
     v = values.get(conf["login_cookie"]) or ""
     if not v or len(v) < 8:  # 空/短值当没有(游客态与中间态)
+        return False
+    also = conf.get("also_cookie")
+    if also and not values.get(also):  # 登录专属 cookie(如 B站 DedeUserID),游客没有
         return False
     js = conf.get("verify")
     if js:
@@ -84,29 +88,57 @@ def _looks_logged_in(ctx, page, conf) -> bool:
     return True
 
 
+def youtube_from_chrome() -> int:
+    """YouTube 专用:不用弹窗——Google 登录页拦自动化浏览器(「此浏览器或应用可能不安全」),
+    直接从用户主 Chrome 读现成的 youtube.com cookie(2026-10-18 站长拍板)。"""
+    sys.path.insert(0, str(BASE))
+    from core import chrome_import
+    write_status("youtube", "waiting",
+                 "已打开你的主 Chrome:确认 YouTube 是登录状态即可(通常已登录;首次可能要允许一次钥匙串)")
+    print("[youtube] 用主 Chrome 导入登录态:已打开 youtube.com,登录着就行,什么都不用点…")
+    ok, n = chrome_import.wait_and_import(TIMEOUT_SEC)
+    if ok:
+        write_status("youtube", "ok", f"从主 Chrome 导入登录态({n} 个 cookie)")
+        print(f"[youtube] ✓ 导入成功({n} 个 cookie) → data/identity/youtube.json")
+        return 0
+    write_status("youtube", "timeout", "超时没读到登录 cookie(在 Chrome 里登录 YouTube 后重试)")
+    print("[youtube] ✗ 超时")
+    return 1
+
+
+def weibo_from_chrome() -> int:
+    """微博专用:扫码新会话会被软风控(实测养两天不解),走主 Chrome 登录导入成熟会话
+    (wu2198 同款;游客 cookie 判不了登录,起无头真浏览器验 $CONFIG.uid 坐实)。"""
+    sys.path.insert(0, str(BASE))
+    from core import chrome_import
+    write_status("weibo", "waiting",
+                 "已打开你的主 Chrome:在里面登录微博(账号密码/短信验证码都行),登录着就行——成熟会话比扫码稳")
+    print("[weibo] 用主 Chrome 导入登录态:已打开 weibo.com,请在里面登录微博…")
+    ok, n, uid = chrome_import.weibo_wait_and_import(TIMEOUT_SEC)
+    if ok:
+        write_status("weibo", "ok", f"从主 Chrome 导入成熟登录态({n} 个 cookie,uid={uid})")
+        print(f"[weibo] ✓ 导入成功({n} 个 cookie,uid={uid}) → data/identity/weibo.json")
+        return 0
+    write_status("weibo", "timeout", "超时没在 Chrome 里登录微博(登录后重点「扫码登录」重新导入)")
+    print("[weibo] ✗ 超时")
+    return 1
+
+
 def main() -> int:
-    if len(sys.argv) != 2 or sys.argv[1] not in PLATFORMS:
-        print("用法: python login_qr.py <douyin|weibo|xhs|youtube>")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("douyin", "weibo", "xhs", "youtube", "bilibili"):
+        print("用法: python login_qr.py <douyin|weibo|xhs|youtube|bilibili>")
         return 2
     platform = sys.argv[1]
     if platform == "youtube":
         return youtube_from_chrome()
+    if platform == "weibo":
+        return weibo_from_chrome()
     conf = PLATFORMS[platform]
     write_status(platform, "waiting", conf["tip"])
     print(f"[{platform}] 打开浏览器:{conf['url']}  → {conf['tip']}")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, args=["--no-proxy-server"])
-        ctx_kwargs = {"viewport": {"width": 1100, "height": 800}}
-        if conf.get("proxy"):  # YouTube 需要走梯子(本机 Clash)
-            import yaml
-            cfgp = BASE / "config.yaml"
-            try:
-                proxy = (yaml.safe_load(cfgp.read_text(encoding="utf-8")).get("proxy") or {}).get("http", "")
-            except Exception:
-                proxy = ""
-            if proxy:
-                ctx_kwargs["proxy"] = {"server": proxy}
-        ctx = browser.new_context(**ctx_kwargs)
+        ctx = browser.new_context(viewport={"width": 1100, "height": 800})
         page = ctx.new_page()
         page.goto(conf["url"], wait_until="domcontentloaded", timeout=45000)
         deadline = time.time() + TIMEOUT_SEC
