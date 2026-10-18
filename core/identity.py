@@ -9,6 +9,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from . import db
+
 IDENT_DIR = Path(__file__).resolve().parents[1] / "data" / "identity"
 SUPPORTED = ("douyin", "weibo", "xhs", "youtube", "bilibili")
 
@@ -46,7 +48,8 @@ def cookie_header(platform: str) -> str:
 def info(platform: str) -> dict:
     path = state_path(platform)
     logged = path.exists()
-    out = {"platform": platform, "logged_in": logged}
+    out = {"platform": platform, "logged_in": logged,
+           "following_count": db.following_count(platform)}
     if logged:
         out["saved_at"] = datetime.fromtimestamp(path.stat().st_mtime).strftime("%m-%d %H:%M")
     status_file = IDENT_DIR / f"login_status_{platform}.json"
