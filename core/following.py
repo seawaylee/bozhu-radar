@@ -2,8 +2,12 @@
 
 - 抖音:登录 cookie + a_bogus 本地签名,走 /aweme/v1/web/user/following/list/
   (签名模块为 Apache-2.0 开源算法副本 _douyin_abogus;纯接口,不碰浏览器)
-- 微博:登录 cookie + weibo.com 桌面 ajax(wu2198 同款传输层)
-- 小红书:列表接口有设备盾签名,暂不拉取(如实标注,进阶节内容)
+- B站:登录 cookie(SESSDATA)+ curl_cffi 指纹,走 /x/relation/followings
+  (2026-10-18 实测该接口匿名 -101,必须登录;登录走面板内嵌二维码纯 HTTP 通道)
+- 微博:登录 cookie + weibo.com 桌面 ajax(wu2198 同款传输层);扫码新会话数据接口
+  持续软风控(2026-10-18 复测养两天仍「地址不存在」),config.yaml 成熟 cookie 可回退
+- 小红书:登录态起无头浏览器,开自己主页的关注弹窗,拦页内 followeduser 接口
+  (浏览器自己带设备盾签名,2026-10-18 登录态失效待重扫,通道待实测)
 只拉列表用于「挑人」,监控仍按名单逐人抓——关注几百个不等于全部监控。
 """
 from __future__ import annotations
@@ -103,8 +107,12 @@ def refresh_douyin() -> int:
 
 def refresh_weibo() -> int:
     header = identity.cookie_header("weibo")
+    if "SUBP" not in header:  # 扫码态优先;没有就回退 config.yaml 手粘的成熟 cookie(与内容通道同源)
+        header = str(config.load().get("weibo", {}).get("cookie") or "").strip()
     if "SUBP" not in header:
-        raise AdapterError("请先扫码登录微博(身份与登录 → 扫码)")
+        raise AdapterError("请先扫码登录微博(身份与登录 → 扫码);"
+                           "或把浏览器成熟 Cookie 粘到 config.yaml weibo.cookie"
+                           "(扫码新会话会被微博软风控,成熟 cookie 不受影响)")
     s = requests.Session()
     s.trust_env = False
     s.headers.update({"User-Agent": UA, "Accept": "application/json, text/plain, */*",
@@ -113,10 +121,17 @@ def refresh_weibo() -> int:
         if "=" in chunk:
             name, value = chunk.strip().split("=", 1)
             s.cookies.set(name, value, domain=".weibo.com")
-    mine = s.get("https://weibo.com/ajax/profile/myinfo", timeout=15).json()
-    my_uid = str(((mine.get("data") or {}).get("user") or {}).get("id") or "")
+    r = s.get("https://weibo.com/ajax/profile/myinfo", timeout=15)
+    try:
+        mine = r.json()
+    except Exception:
+        mine = {}
+    my_uid = str((((mine.get("data") or {}).get("user")) or {}).get("id") or "")
     if not my_uid:
-        raise AdapterError("微博:拿不到自己的 uid(登录态异常)")
+        # 2026-10-18 实测:扫码新会话调数据接口返回 {"ok":0,"message":"你访问的地址不存在"}(软风控),
+        # 养两天不解;成熟浏览器 cookie(粘 config.yaml weibo.cookie)不受影响
+        raise AdapterError("微博接口拒绝服务(扫码新会话被软风控,实测养两天也不解):"
+                           "把浏览器里登录微博的成熟 Cookie 粘到 config.yaml weibo.cookie 后再拉")
     total, page = 0, 1
     while page < 50:
         payload = s.get("https://weibo.com/ajax/friendships/friends",
@@ -185,6 +200,120 @@ def refresh_youtube() -> int:
     return total
 
 
+def refresh_bilibili() -> int:
+    ck = identity.load_cookies("bilibili") or {}
+    if not ck.get("SESSDATA") or not ck.get("DedeUserID"):
+        raise AdapterError("请先扫码登录 B站(身份与登录 → 扫码,面板内嵌二维码)")
+    mid = ck["DedeUserID"]
+    from curl_cffi import requests as creq
+    s = creq.Session(impersonate="chrome")
+    for name in ("SESSDATA", "DedeUserID", "buvid3", "buvid4", "b_nut"):
+        if ck.get(name):
+            s.cookies.set(name, ck[name], domain=".bilibili.com")
+    page, pages = 1, 0
+    while pages < 60:
+        r = s.get("https://api.bilibili.com/x/relation/followings",
+                  params={"vmid": mid, "pn": page, "ps": 50, "order": "desc",
+                          "gaia_source": "main_web"},
+                  headers={"Referer": f"https://space.bilibili.com/{mid}/fans/follow",
+                           "Origin": "https://space.bilibili.com"}, timeout=15)
+        d = r.json()
+        if d.get("code") == -101:
+            raise AdapterError("B站登录态失效,请重新扫码")
+        if d.get("code") != 0:
+            raise AdapterError(f"B站接口失败:{d.get('message')}")
+        users = (d.get("data") or {}).get("list") or []
+        if not users:
+            break
+        for u in users:
+            if u.get("mid"):
+                db.upsert_following("bilibili", str(u["mid"]), u.get("uname") or str(u["mid"]),
+                                    (u.get("sign") or "")[:50])
+        if len(users) < 50:
+            break
+        page += 1
+        pages += 1
+        time.sleep(1.2)  # 翻页间隔,礼貌采集(B站风控对连发敏感)
+    db.meta_set("following:bilibili:fetched_at", db.now_iso())
+    return db.following_count("bilibili")
+
+
+def refresh_xhs() -> int:
+    """小红书:无头浏览器开「我的关注」弹窗,拦页内 followeduser 接口(浏览器自带设备盾签名)。
+    ⚠️ 2026-10-18 登录态已失效(guest),通道代码就绪但端到端待重扫后实测。"""
+    if not identity.state_path("xhs").exists():
+        raise AdapterError("请先扫码登录小红书(身份与登录 → 扫码)")
+    from playwright.sync_api import sync_playwright
+
+    me: dict = {}
+    payloads: list[dict] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-proxy-server"])
+        ctx = browser.new_context(storage_state=str(identity.state_path("xhs")),
+                                  viewport={"width": 1380, "height": 900})
+        pg = ctx.new_page()
+
+        def on_resp(r):
+            if r.status != 200:
+                return
+            if "/user/me" in r.url or "followeduser" in r.url:
+                try:
+                    (payloads if "followeduser" in r.url else me).update(r.json())
+                except Exception:
+                    pass
+        pg.on("response", on_resp)
+
+        pg.goto("https://www.xiaohongshu.com", wait_until="domcontentloaded", timeout=45000)
+        pg.wait_for_timeout(4500)
+        data = me.get("data") or {}
+        if data.get("guest") or not data.get("user_id"):
+            browser.close()
+            raise AdapterError("小红书登录态已失效(服务端判为访客),请到「身份与登录」重新扫码")
+        uid = str(data["user_id"])
+        pg.goto(f"https://www.xiaohongshu.com/user/profile/{uid}",
+                wait_until="domcontentloaded", timeout=45000)
+        pg.wait_for_timeout(4000)
+        clicked = pg.evaluate("""() => {
+            const cands = Array.from(document.querySelectorAll('a, span, div'))
+                .filter(e => e.childElementCount === 0);
+            const el = cands.find(e => /^\\d+\\s*关注$/.test((e.textContent||'').trim()));
+            if (el) { el.click(); return true; }
+            return false;
+        }""")
+        if not clicked:
+            browser.close()
+            raise AdapterError("没找到「关注」入口(页面结构可能变了,重新扫码后再试;仍不行请反馈)")
+        prev, stagnant = -1, 0
+        for _ in range(40):  # 弹窗内滚动翻页,接口响应连拦 3 轮不涨就认为拉完
+            pg.evaluate("""() => { const m = document.querySelector('.user-list, [class*=user-list]');
+                if (m) m.scrollTop = m.scrollHeight; }""")
+            pg.wait_for_timeout(1300)
+            if len(payloads) == prev:
+                stagnant += 1
+                if stagnant >= 3:
+                    break
+            else:
+                stagnant = 0
+                prev = len(payloads)
+        browser.close()
+    total = 0
+    seen: set[str] = set()
+    for payload in payloads:
+        users = ((payload.get("data") or {}).get("users")
+                 or (payload.get("data") or {}).get("followed_users") or [])
+        for u in users:
+            uid_f = str(u.get("user_id") or "")
+            if uid_f and uid_f not in seen:
+                seen.add(uid_f)
+                db.upsert_following("xhs", uid_f, u.get("nickname") or uid_f,
+                                    (u.get("desc") or "")[:50])
+                total += 1
+    if not total:
+        raise AdapterError("拉到了 0 条(弹窗接口没被触发;重新登录后再试,仍不行请反馈)")
+    db.meta_set("following:xhs:fetched_at", db.now_iso())
+    return total
+
+
 def refresh(platform: str) -> int:
     if platform == "douyin":
         return refresh_douyin()
@@ -192,7 +321,11 @@ def refresh(platform: str) -> int:
         return refresh_weibo()
     if platform == "youtube":
         return refresh_youtube()
-    raise AdapterError("小红书关注列表暂不可拉取(接口有设备盾签名,进阶节内容)")
+    if platform == "bilibili":
+        return refresh_bilibili()
+    if platform == "xhs":
+        return refresh_xhs()
+    raise AdapterError("该平台暂不支持拉取关注列表")
 
 
 def list_following(platform: str, q: str = "", limit: int = 400) -> list[dict]:

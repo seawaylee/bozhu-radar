@@ -92,8 +92,8 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(url.query)
             platform = (q.get("platform") or [""])[0]
             keyword = (q.get("q") or [""])[0]
-            if platform not in ("douyin", "weibo", "youtube"):
-                self._error("platform 必须是 douyin / weibo / youtube")
+            if platform not in ("douyin", "weibo", "youtube", "bilibili", "xhs"):
+                self._error("platform 必须是 douyin / weibo / youtube / bilibili / xhs")
                 return
             self._json({"ok": True, "items": following.list_following(platform, keyword),
                         "total": db.following_count(platform)})
@@ -169,6 +169,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.api_items_manual(body))
             elif url.path == "/api/identity/login":
                 self._json(self.api_identity_login(body))
+            elif url.path == "/api/identity/bilibili/qr":
+                try:
+                    self._json({"ok": True, **identity.bilibili_qr_start()})
+                except Exception as exc:
+                    self._json({"ok": False, "error": str(exc)[:200]}, 200)
+            elif url.path == "/api/identity/bilibili/poll":
+                key = str(body.get("key") or "")
+                if not key:
+                    self._error("缺 key(二维码签发时返回的 qrcode_key)")
+                    return
+                try:
+                    self._json({"ok": True, **identity.bilibili_qr_poll(key)})
+                except Exception as exc:
+                    self._json({"ok": False, "error": str(exc)[:200]}, 200)
             elif url.path == "/api/following/refresh":
                 platform = str(body.get("platform") or "")
                 try:
@@ -300,10 +314,13 @@ class Handler(BaseHTTPRequestHandler):
         return {"ok": True, "item_id": iid, "tag": tag, "classifier": classifier}
 
     def api_identity_login(self, body: dict) -> dict:
-        """弹浏览器窗口扫码;交互式操作,窗口由用户当面使用后自动关闭。"""
+        """弹浏览器窗口扫码;交互式操作,窗口由用户当面使用后自动关闭。
+        B站不走这里:纯 HTTP 二维码内嵌面板(/api/identity/bilibili/qr)。"""
         platform = str(body.get("platform") or "")
+        if platform == "bilibili":
+            return {"ok": False, "error": "B站用面板内嵌二维码:点扫码后直接扫屏幕上的图"}
         if platform not in identity.SUPPORTED:
-            return {"ok": False, "error": "支持的平台:douyin / weibo / xhs"}
+            return {"ok": False, "error": "支持的平台:douyin / weibo / xhs / youtube / bilibili"}
         script = BASE_DIR / "login_qr.py"
         log_path = BASE_DIR / "data" / "login_qr.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
