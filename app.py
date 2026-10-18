@@ -327,8 +327,10 @@ class Handler(BaseHTTPRequestHandler):
         with open(log_path, "a", encoding="utf-8") as lf:
             subprocess.Popen([sys.executable, str(script), platform],
                              stdout=lf, stderr=lf, start_new_session=True)
-        return {"ok": True,
-                "tip": "浏览器窗口已打开:在里面点登录→扫码;完成后这里自动变绿(240 秒超时)"}
+        tip = ("已打开你的主 Chrome:确认 YouTube 是登录状态即可,不用扫码(240 秒超时)"
+               if platform == "youtube"
+               else "浏览器窗口已打开:在里面点登录→扫码;完成后这里自动变绿(240 秒超时)")
+        return {"ok": True, "tip": tip}
 
     def api_creators_bulk(self, body: dict) -> dict:
         platform = str(body.get("platform") or "")

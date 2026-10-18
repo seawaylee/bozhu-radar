@@ -41,11 +41,31 @@ def write_status(platform: str, state: str, detail: str = "") -> None:
                    ensure_ascii=False), encoding="utf-8")
 
 
+def youtube_from_chrome() -> int:
+    """YouTube 专用:不用弹窗——Google 登录页拦自动化浏览器(「此浏览器或应用可能不安全」),
+    直接从用户主 Chrome 读现成的 youtube.com cookie(2026-10-18 站长拍板)。"""
+    sys.path.insert(0, str(BASE))
+    from core import chrome_import
+    write_status("youtube", "waiting",
+                 "已打开你的主 Chrome:确认 YouTube 是登录状态即可(通常已登录;首次可能要允许一次钥匙串)")
+    print("[youtube] 用主 Chrome 导入登录态:已打开 youtube.com,登录着就行,什么都不用点…")
+    ok, n = chrome_import.wait_and_import(TIMEOUT_SEC)
+    if ok:
+        write_status("youtube", "ok", f"从主 Chrome 导入登录态({n} 个 cookie)")
+        print(f"[youtube] ✓ 导入成功({n} 个 cookie) → data/identity/youtube.json")
+        return 0
+    write_status("youtube", "timeout", "超时没读到登录 cookie(在 Chrome 里登录 YouTube 后重试)")
+    print("[youtube] ✗ 超时")
+    return 1
+
+
 def main() -> int:
     if len(sys.argv) != 2 or sys.argv[1] not in PLATFORMS:
-        print("用法: python login_qr.py <douyin|weibo|xhs>")
+        print("用法: python login_qr.py <douyin|weibo|xhs|youtube>")
         return 2
     platform = sys.argv[1]
+    if platform == "youtube":
+        return youtube_from_chrome()
     conf = PLATFORMS[platform]
     write_status(platform, "waiting", conf["tip"])
     print(f"[{platform}] 打开浏览器:{conf['url']}  → {conf['tip']}")
