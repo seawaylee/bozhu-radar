@@ -477,9 +477,11 @@ async function loadIdentity(){
     document.getElementById('identity').innerHTML=identityCache.map(it=>{
       const waiting=it.login_state==='waiting';
       const stale=it.login_state==='stale';
-      const cls=stale?'bad':(it.logged_in?'ok':(waiting?'waiting':''));
+      const errored=it.login_state==='error';
+      const cls=stale?'bad':(it.logged_in?'ok':((waiting||errored)?'waiting':''));
       const stat=stale?`已失效 · ${esc(it.login_detail||'请重新扫码')}`
-        :(it.logged_in?`已登录 · ${esc(it.saved_at||'')}`:(waiting?'等待扫码…':'未登录'));
+        :(it.logged_in?`已登录 · ${esc(it.saved_at||'')}`
+        :(waiting?'等待扫码…':(errored?`启动失败 · ${esc(it.login_detail||'稍后再试')}`:'未登录')));
       const ops=[];
       if(!it.logged_in)ops.push(`<button class="btn ghost" onclick="qrLogin('${it.platform}')">扫码登录</button>`);
       else{
@@ -515,6 +517,7 @@ function openPullModal(platform){
 function closePullModal(){document.getElementById('pullmodal').classList.remove('show')}
 function pullStateLabel(it){
   if(it.login_state==='stale')return '已失效';
+  if(it.login_state==='error')return '上次启动失败';
   if(it.logged_in)return it.following_count?`已拉 ${it.following_count} 位`:'已登录';
   return it.login_state==='waiting'?'等待扫码':'未登录';
 }

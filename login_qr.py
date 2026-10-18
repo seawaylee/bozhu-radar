@@ -124,23 +124,33 @@ def weibo_from_chrome() -> int:
     return 1
 
 
-def main() -> int:
-    if len(sys.argv) != 2 or sys.argv[1] not in ("douyin", "weibo", "xhs", "youtube", "bilibili"):
-        print("用法: python login_qr.py <douyin|weibo|xhs|youtube|bilibili>")
-        return 2
-    platform = sys.argv[1]
-    if platform == "youtube":
-        return youtube_from_chrome()
-    if platform == "weibo":
-        return weibo_from_chrome()
-    conf = PLATFORMS[platform]
-    write_status(platform, "waiting", conf["tip"])
-    print(f"[{platform}] 打开浏览器:{conf['url']}  → {conf['tip']}")
+def _safe_goto(page, url: str) -> bool:
+    """页面打开带降级:先等 domcontentloaded(45s),超时就降级只等导航开始(commit)+8s 静置。
+    小红书等站风控会挂起页面让 domcontentloaded 永不触发(2026-10-19 实测闪退根因)。"""
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        return True
+    except Exception:
+        pass
+    try:
+        page.goto(url, wait_until="commit", timeout=20000)
+        page.wait_for_timeout(8000)  # 页面往往已渲染出内容,够用户操作
+        return True
+    except Exception as exc:
+        print(f"[goto] {url} 打不开:{str(exc)[:100]}")
+        return False
+
+
+def _qr_flow(platform: str, conf: dict) -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, args=["--no-proxy-server"])
         ctx = browser.new_context(viewport={"width": 1100, "height": 800})
         page = ctx.new_page()
-        page.goto(conf["url"], wait_until="domcontentloaded", timeout=45000)
+        if not _safe_goto(page, conf["url"]):
+            browser.close()
+            write_status(platform, "error", "页面打不开(网络波动或平台风控),稍后再试一次")
+            print(f"[{platform}] ✗ 页面打不开")
+            return 1
         deadline = time.time() + TIMEOUT_SEC
         ok, streak = False, 0
         while time.time() < deadline:
@@ -168,6 +178,26 @@ def main() -> int:
             print(f"[{platform}] ✗ 超时未扫码")
         browser.close()
     return 0 if ok else 1
+
+
+def main() -> int:
+    if len(sys.argv) != 2 or sys.argv[1] not in ("douyin", "weibo", "xhs", "youtube", "bilibili"):
+        print("用法: python login_qr.py <douyin|weibo|xhs|youtube|bilibili>")
+        return 2
+    platform = sys.argv[1]
+    if platform == "youtube":
+        return youtube_from_chrome()
+    if platform == "weibo":
+        return weibo_from_chrome()
+    conf = PLATFORMS[platform]
+    write_status(platform, "waiting", conf["tip"])
+    print(f"[{platform}] 打开浏览器:{conf['url']}  → {conf['tip']}")
+    try:
+        return _qr_flow(platform, conf)
+    except Exception as exc:  # 任何异常都不能让窗口无声消失+状态永挂 waiting
+        write_status(platform, "error", f"登录窗口异常退出:{str(exc)[:60]}")
+        print(f"[{platform}] ✗ 异常:{exc}")
+        return 1
 
 
 if __name__ == "__main__":
