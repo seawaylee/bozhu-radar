@@ -324,8 +324,8 @@ footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:24px;line-
   <!-- ── 视图:我的关注(扫码后拉取,搜索筛选批量加) ── -->
   <section class="view" id="view-following">
       <div class="card">
-        <h3>我的关注 <span class="hint">拉取你的关注列表 → 搜索筛选 → 勾选批量加入监控;关注几百个≠全部监控,挑着来</span>
-          <span class="ops"><button class="btn ghost" id="fRefreshBtn" onclick="openPullModal(importData.platform)">⟳ 从平台拉取最新</button></span></h3>
+        <h3>我的关注 <span class="hint">点「拉取我的关注」从平台拉列表 → 搜索筛选 → 勾选批量加入监控;关注几百个≠全部监控,挑着来</span>
+          <span class="ops"><button class="btn primary" id="fRefreshBtn" onclick="openPullModal(importData.platform)">⟳ 拉取我的关注</button></span></h3>
         <div class="fchips" id="fPlat"></div>
         <div class="filters"><input type="text" id="mSearch" style="flex:1" placeholder="输入名字筛选,如:财经 / 老纪 / 新闻…" oninput="renderImportList()"></div>
         <div class="items-head"><span id="fCount"></span></div>
@@ -470,10 +470,17 @@ function renderStatus(d){
 }
 
 /* ---------- 身份与登录 ---------- */
-let identityCache=[],identityPoll=null;
+let identityCache=[],identityPoll=null,identityOkMap={};
 async function loadIdentity(){
   try{
     const d=await api('/api/identity/status');identityCache=d.identities||[];
+    for(const it of identityCache){   // 登录成功瞬间(waiting→ok):主动指路去「我的关注」拉取
+      const ok=it.logged_in&&it.login_state==='ok';
+      if(ok&&identityOkMap[it.platform]===false){
+        toast(`✓ ${ID_LABEL[it.platform]||it.platform}登录成功——到「我的关注」拉取列表`);
+      }
+      identityOkMap[it.platform]=ok;
+    }
     document.getElementById('identity').innerHTML=identityCache.map(it=>{
       const waiting=it.login_state==='waiting';
       const stale=it.login_state==='stale';
@@ -484,10 +491,7 @@ async function loadIdentity(){
         :(waiting?'等待扫码…':(errored?`启动失败 · ${esc(it.login_detail||'稍后再试')}`:'未登录')));
       const ops=[];
       if(!it.logged_in)ops.push(`<button class="btn ghost" onclick="qrLogin('${it.platform}')">扫码登录</button>`);
-      else{
-        ops.push(`<button class="btn ghost" onclick="openPullModal('${it.platform}')">拉取我的关注</button>`);
-        ops.push(`<button class="btn ghost" onclick="qrLogin('${it.platform}')">重新扫码</button>`);
-      }
+      else ops.push(`<button class="btn ghost" onclick="qrLogin('${it.platform}')">重新扫码</button>`);
       return `<div class="idrow"><span class="st-dot ${cls}"></span><span class="nm">${ID_LABEL[it.platform]||it.platform}</span>
         <span class="stat">${stat}${waiting?'(浏览器窗口已开,在里面点登录扫码)':''}</span>
         <span class="ops">${ops.join('')}</span></div>`;
