@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import re
 import subprocess
@@ -310,8 +311,9 @@ class Handler(BaseHTTPRequestHandler):
         log_path = BASE_DIR / "data" / "login_qr.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as lf:
+            env = {**os.environ, "PYTHONUNBUFFERED": "1"}  # 日志实时落盘,扫码过程可实时盯
             proc = subprocess.Popen([sys.executable, str(script), platform],
-                                    stdout=lf, stderr=lf, start_new_session=True)
+                                    stdout=lf, stderr=lf, start_new_session=True, env=env)
         threading.Thread(target=proc.wait, daemon=True).start()  # 收尸:不 wait 会积僵尸进程
         tip_by_platform = {
             "youtube": "已打开你的主 Chrome:确认 YouTube 是登录状态即可,不用扫码(240 秒超时)",
