@@ -241,11 +241,18 @@ img{width:240px;height:240px}
                    "User-Agent": ua, "Accept": "application/json, text/plain, */*",
                    "Origin": "https://weread.qq.com", "Referer": "https://weread.qq.com/"}
             try:
-                j = rq.get("https://weread.qq.com/web/shelf/sync",
-                           params={"userVid": "", "synckey": 0, "lectureSynckey": 0},
-                           headers=hdr, timeout=20, proxies={"http": None, "https": None}).json()
-                print(f"[gzh] shelf/sync errCode={j.get('errCode')}")
-                return j.get("errCode") == 0
+                r2 = rq.get("https://weread.qq.com/web/shelf/sync",
+                            params={"userVid": "", "synckey": 0, "lectureSynckey": 0},
+                            headers=hdr, timeout=20, proxies={"http": None, "https": None})
+                j = r2.json()
+                # werss 语义:errCode 缺省=0=成功,成功响应就是书架数据本身
+                # ({"books":[...],"synckey":...}),只有 -2012/-2010/-2041/-2014 才是失效。
+                # (18:27 实录:真会话返回 errCode=None,被我误扔——别再要求 errCode==0)
+                ec = j.get("errCode", j.get("errcode", 0))
+                ok = (r2.status_code == 200 and ec not in (-2012, -2010, -2041, -2014)
+                      and (ec == 0 or "books" in j or "synckey" in j))
+                print(f"[gzh] shelf/sync errCode={ec!r} books={len(j.get('books') or [])} -> {'✓' if ok else '✗'}")
+                return ok
             except Exception as exc:
                 print(f"[gzh] shelf/sync 异常:{str(exc)[:60]}")
                 return False
@@ -423,12 +430,12 @@ def main() -> int:
         return weibo_from_chrome()
     if platform == "xhs":
         return xhs_from_chrome()
-    conf = PLATFORMS[platform]
-    write_status(platform, "waiting", conf["tip"])
-    print(f"[{platform}] 打开浏览器:{conf['url']}  → {conf['tip']}")
     try:
-        if platform == "gzh":
+        if platform == "gzh":  # gzh 不在 PLATFORMS(自驱动二维码,不 goto 外部页面)
             return gzh_qr_flow()
+        conf = PLATFORMS[platform]
+        write_status(platform, "waiting", conf["tip"])
+        print(f"[{platform}] 打开浏览器:{conf['url']}  → {conf['tip']}")
         return _qr_flow(platform, conf)
     except Exception as exc:  # 任何异常都不能让窗口无声消失+状态永挂 waiting
         write_status(platform, "error", f"登录窗口异常退出:{str(exc)[:60]}")
