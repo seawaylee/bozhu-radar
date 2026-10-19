@@ -23,12 +23,6 @@ IDENT_DIR = BASE / "data" / "identity"
 PLATFORMS = {
     "douyin": {"url": "https://www.douyin.com/", "login_cookie": "sessionid",
                "tip": "在弹出的窗口里点右上角「登录」→ 扫码(窗口会等到真登录完成才关闭)"},
-    "gzh": {"url": "https://weread.qq.com/", "login_cookie": "wr_skey",
-            # 地面真值:页内问书架接口 errCode==0 才算登录(werss 同款坑:userVid 必须空串)
-            "verify": "async () => { try { const r = await fetch('/web/shelf/sync?userVid=&synckey=0', "
-                      "{headers: {'Accept': 'application/json'}}); const d = await r.json(); "
-                      "return d.errCode === 0; } catch(e) { return false } }",
-            "tip": "在弹出的窗口里登录微信读书(微信扫一扫即可,不需要公众号后台),扫完等页面出现书架"},
     "bilibili": {"url": "https://www.bilibili.com/", "login_cookie": "SESSDATA",
                  # SESSDATA/DedeUserID 都是登录后才有的 cookie(游客没有);双 cookie 互为指纹
                  "also_cookie": "DedeUserID",
@@ -131,6 +125,224 @@ def xhs_from_chrome() -> int:
     return 1
 
 
+def gzh_qr_flow() -> int:
+    """公众号(微信读书通道)扫码·自驱动版(2026-10-19 重做)。
+    旧版开 weread.qq.com 页面等它自己登录:站长扫完码,240s 判定全程不过且零诊断
+    信号。新版按 werss 成熟配方自己驱动:getLoginUid → 本地二维码(编码
+    /web/confirm?uid=) → 长轮询 getLoginInfo → 多候选组合 + /web/login/renewal
+    用 wr_rt 换有效 wr_skey(新版 8 字符短 skey 常被 -2012 拒) → shelf/sync
+    地面真值收口。每步都有服务端回执,失败能说清死在哪。"""
+    import base64
+    from io import BytesIO
+    from urllib.parse import quote
+
+    import requests as rq
+    import qrcode
+
+    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36")
+    s = rq.Session()
+    s.trust_env = False  # weread 国内直连,不走系统代理
+    s.headers.update({"User-Agent": ua, "Accept": "application/json, text/plain, */*",
+                      "Accept-Language": "zh-CN,zh;q=0.9",
+                      "Origin": "https://weread.qq.com", "Referer": "https://weread.qq.com/"})
+
+    write_status("gzh", "waiting", "已弹出二维码:微信扫一扫登录微信读书(不需要公众号后台),完成后自动收窗")
+    print("[gzh] 自驱动扫码:取登录码…")
+
+    # 1) 登录 uid
+    try:
+        d = s.get("https://weread.qq.com/api/auth/getLoginUid", timeout=20).json()
+    except Exception as exc:
+        write_status("gzh", "error", f"微信读书接口不通:{str(exc)[:60]}")
+        print(f"[gzh] ✗ getLoginUid 异常:{exc}")
+        return 1
+    uid = str(d.get("uid") or (d.get("data") or {}).get("uid") or "")
+    if not uid:
+        write_status("gzh", "error", "微信读书没下发登录码,稍后再试一次")
+        print(f"[gzh] ✗ getLoginUid 无 uid:{str(d)[:100]}")
+        return 1
+    print(f"[gzh] uid={uid}")
+
+    # 2) 本地生成二维码(编码手机确认页;不依赖外部页面,永不白屏)
+    qr = qrcode.QRCode(box_size=10, border=2)
+    qr.add_data(f"https://weread.qq.com/web/confirm?uid={uid}")
+    qr.make(fit=True)
+    buf = BytesIO()
+    qr.make_image().save(buf, format="PNG")
+    qr_uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    html = """<!doctype html><html><head><meta charset="utf-8"><title>公众号登录</title>
+<style>
+body{font-family:-apple-system,'PingFang SC',sans-serif;margin:0;display:flex;align-items:center;
+justify-content:center;height:100vh;background:#f6f7f9}
+.card{background:#fff;border-radius:14px;padding:26px 30px;box-shadow:0 2px 12px rgba(0,0,0,.08);text-align:center}
+h1{font-size:16px;margin:0 0 6px;color:#24160f}
+p{color:#8a7a6a;font-size:13px;margin:4px 0 12px}
+img{width:240px;height:240px}
+#st{margin-top:12px;font-size:14px;color:#666;font-weight:600}
+</style></head><body><div class="card">
+<h1>公众号登录 · 微信扫一扫</h1>
+<p>登录的是「微信读书」(用你的微信),不需要公众号后台</p>
+<img src="__QR__"><div id="st">等待扫码…(完成后窗口自动关闭)</div>
+</div></body></html>""".replace("__QR__", qr_uri)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False, args=["--no-proxy-server"])
+        page = browser.new_page(viewport={"width": 480, "height": 580})
+        page.set_content(html)
+
+        def set_st(text: str, color: str = "#666"):
+            try:
+                page.evaluate("([t,c])=>{const e=document.getElementById('st');e.textContent=t;e.style.color=c}",
+                              [text, color])
+            except Exception:
+                pass  # 用户提前关窗:页面没了不打紧,轮询照常走到超时
+
+        # 3) 长轮询登录结果(接口单次可挂起 ~70s 属正常)
+        print("[gzh] 等待扫码(240s)…")
+        deadline = time.time() + TIMEOUT_SEC
+        login = None
+        while time.time() < deadline:
+            try:
+                r = s.get("https://weread.qq.com/api/auth/getLoginInfo",
+                          params={"uid": uid, "otp": ""}, timeout=70)
+                d = r.json()
+            except Exception:
+                time.sleep(1)  # 长轮询超时/网络抖动,接着问
+                continue
+            inner = d.get("data") or {}
+            if d.get("succeed") or inner.get("succeed"):
+                login = {
+                    "vid": str(d.get("webLoginVid") or d.get("vid") or d.get("userVid")
+                              or inner.get("webLoginVid") or inner.get("vid") or inner.get("userVid") or ""),
+                    "access": str(d.get("accessToken") or d.get("token")
+                                  or inner.get("accessToken") or inner.get("token") or ""),
+                    "refresh": str(d.get("refreshToken") or inner.get("refreshToken") or ""),
+                }
+                break
+            # logicCode == LOGIN_TIMEOUT = 还没扫,继续等(papers3-weread 同款语义)
+            time.sleep(1)
+
+        if not login:
+            write_status("gzh", "timeout", "超时未扫码,可重试")
+            print("[gzh] ✗ 超时未扫码")
+            set_st("✗ 超时未扫码", "#c0392b")
+            page.wait_for_timeout(3000)
+            browser.close()
+            return 1
+
+        print(f"[gzh] 扫码确认成功 vid={login['vid']} access_len={len(login['access'])} rt_len={len(login['refresh'])}")
+        set_st("已确认,正在铸登录态…", "#07c160")
+
+        # 4) 构造多候选 cookie 组合(werss v5 配方:短 skey 常被拒,要靠 wr_rt 续期)
+        def _verify(ck: dict) -> bool:
+            hdr = {"Cookie": "; ".join(f"{k}={v}" for k, v in ck.items()),
+                   "User-Agent": ua, "Accept": "application/json, text/plain, */*",
+                   "Origin": "https://weread.qq.com", "Referer": "https://weread.qq.com/"}
+            try:
+                j = rq.get("https://weread.qq.com/web/shelf/sync",
+                           params={"userVid": "", "synckey": 0, "lectureSynckey": 0},
+                           headers=hdr, timeout=20, proxies={"http": None, "https": None}).json()
+                print(f"[gzh] shelf/sync errCode={j.get('errCode')}")
+                return j.get("errCode") == 0
+            except Exception as exc:
+                print(f"[gzh] shelf/sync 异常:{str(exc)[:60]}")
+                return False
+
+        def _renew(ck: dict) -> dict | None:
+            """用 wr_rt 换新 wr_skey。cookie 必须注入 jar(domain=weread.qq.com),
+            否则服务端当游客处理返回 -2013(werss 生产踩过)。"""
+            rs = rq.Session()
+            rs.trust_env = False
+            rs.headers.update({"User-Agent": ua, "Accept": "application/json, text/plain, */*",
+                               "Accept-Language": "zh-CN,zh;q=0.9",
+                               "Origin": "https://weread.qq.com", "Referer": "https://weread.qq.com/",
+                               "Content-Type": "application/json"})
+            for k, v in ck.items():
+                rs.cookies.set(k, v, domain="weread.qq.com", path="/")
+            try:
+                resp = rs.post("https://weread.qq.com/web/login/renewal",
+                               data=json.dumps({"rq": "%2Fweb%2Fbook%2Fread", "ql": True},
+                                               separators=(",", ":")), timeout=20)
+            except Exception as exc:
+                print(f"[gzh] renewal 异常:{str(exc)[:60]}")
+                return None
+            upd, got = dict(ck), False
+            for c in rs.cookies:  # requests 已把 Set-Cookie 并进 jar
+                if c.name in ("wr_skey", "wr_vid", "wr_rt") and c.value:
+                    upd[c.name] = c.value
+                    got = True
+            if not got:
+                try:
+                    j = resp.json()
+                    for f in ("wr_skey", "skey", "token"):
+                        if isinstance(j.get(f), str) and j[f]:
+                            upd["wr_skey"] = j[f]
+                            got = True
+                            break
+                except Exception:
+                    pass
+            print(f"[gzh] renewal {'✓' if got else '✗'} http={resp.status_code}")
+            return upd if got else None
+
+        base = {c.name: c.value or "" for c in s.cookies}
+        if login["vid"] and not base.get("wr_vid"):
+            base["wr_vid"] = login["vid"]
+        rt = login["refresh"]
+        rt_q = quote(rt, safe="") if rt else ""
+        skey_cands = [x for x in dict.fromkeys([login["access"], rt, base.get("wr_skey") or ""]) if x]
+        rt_cands = [x for x in dict.fromkeys([rt_q, rt, base.get("wr_rt") or ""]) if x]
+        base_nt = {k: v for k, v in base.items() if k not in ("wr_skey", "wr_rt")}
+        combos = [dict(base)]  # 原始 Set-Cookie jar 恒第一(werss 实测常直接可用)
+        for sk in skey_cands:
+            combos.append({**base_nt, "wr_skey": sk})
+            for rk in rt_cands:
+                combos.append({**base_nt, "wr_skey": sk, "wr_rt": rk})
+        for rk in rt_cands:
+            combos.append({**base_nt, "wr_rt": rk})
+        seen, cands = set(), []
+        for c in combos:
+            key = tuple(sorted(c.items()))
+            if key not in seen:
+                seen.add(key)
+                cands.append(c)
+
+        # 5) 逐组合:直接验证 → 失败且带 wr_rt 就续期再验
+        final = None
+        for i, cand in enumerate(cands):
+            if _verify(cand):
+                final = cand
+                break
+            if cand.get("wr_rt"):
+                renewed = _renew(cand)
+                if renewed and _verify(renewed):
+                    final = renewed
+                    break
+            print(f"[gzh] 组合{i + 1}/{len(cands)} 未过,试下一组…")
+
+        if not final:
+            write_status("gzh", "error", "扫码成功但登录态没铸成(微信读书拒绝了令牌),稍后重扫一次")
+            print("[gzh] ✗ 全部组合验证失败")
+            set_st("✗ 登录态未铸成,请重试", "#c0392b")
+            page.wait_for_timeout(4000)
+            browser.close()
+            return 1
+
+        state = {"cookies": [{"name": k, "value": v, "domain": ".weread.qq.com", "path": "/",
+                              "expires": -1, "httpOnly": False, "secure": True, "sameSite": "Lax"}
+                             for k, v in final.items()],
+                 "origins": []}
+        IDENT_DIR.mkdir(parents=True, exist_ok=True)
+        (IDENT_DIR / "gzh.json").write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+        write_status("gzh", "ok", f"登录成功,身份已保存(微信读书 vid={login['vid'] or '?'})")
+        print(f"[gzh] ✓ 登录成功 vid={login['vid']} cookies={len(final)} → data/identity/gzh.json")
+        set_st("✓ 登录成功,窗口即将自动关闭", "#07c160")
+        page.wait_for_timeout(2500)
+        browser.close()
+    return 0
+
+
 def _safe_goto(page, url: str) -> bool:
     """页面打开带降级:先等 domcontentloaded(45s),超时就降级只等导航开始(commit)+8s 静置。
     小红书等站风控会挂起页面让 domcontentloaded 永不触发(2026-10-19 实测闪退根因)。"""
@@ -215,6 +427,8 @@ def main() -> int:
     write_status(platform, "waiting", conf["tip"])
     print(f"[{platform}] 打开浏览器:{conf['url']}  → {conf['tip']}")
     try:
+        if platform == "gzh":
+            return gzh_qr_flow()
         return _qr_flow(platform, conf)
     except Exception as exc:  # 任何异常都不能让窗口无声消失+状态永挂 waiting
         write_status(platform, "error", f"登录窗口异常退出:{str(exc)[:60]}")

@@ -12,6 +12,7 @@ import queue
 import re
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -309,12 +310,14 @@ class Handler(BaseHTTPRequestHandler):
         log_path = BASE_DIR / "data" / "login_qr.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as lf:
-            subprocess.Popen([sys.executable, str(script), platform],
-                             stdout=lf, stderr=lf, start_new_session=True)
+            proc = subprocess.Popen([sys.executable, str(script), platform],
+                                    stdout=lf, stderr=lf, start_new_session=True)
+        threading.Thread(target=proc.wait, daemon=True).start()  # 收尸:不 wait 会积僵尸进程
         tip_by_platform = {
             "youtube": "已打开你的主 Chrome:确认 YouTube 是登录状态即可,不用扫码(240 秒超时)",
             "weibo": "已打开你的主 Chrome:在里面登录微博(扫码/短信都行)——成熟会话比弹窗扫码稳,登录着就行",
             "xhs": "小红书平台风控受限:扫码会话不下发、Chrome 导入被设备指纹拦(实测)——自动登录暂不可用,属进阶内容",
+            "gzh": "已弹出二维码窗口:微信扫一扫即可(登录的是微信读书,不需要公众号后台),完成后这里自动变绿(240 秒超时)",
         }
         tip = tip_by_platform.get(platform,
                                   "浏览器窗口已打开:在里面点登录→扫码;完成后这里自动变绿(240 秒超时)")
